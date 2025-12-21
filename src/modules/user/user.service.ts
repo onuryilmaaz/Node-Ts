@@ -1,0 +1,140 @@
+import { db } from "../../db";
+import { and, eq, isNull } from "drizzle-orm";
+import { users, roles, userRoles, sessions } from "../../db/schema";
+import { comparePassword, hashPassword } from "../../utils/hash";
+import { buildFileUrl, deleteLocalFile } from "../../services/file.service";
+import type { UpdateProfileInput } from "./user.schema";
+
+export async function getUserProfile(userId: string) {
+  const userResult = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      emailVerified: users.emailVerified,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      phone: users.phone,
+      avatarUrl: users.avatarUrl,
+      authProvider: users.authProvider,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const user = userResult[0];
+  if (!user) throw new Error("USER_NOT_FOUND");
+
+  const roleRows = await db
+    .select({
+      name: roles.name,
+    })
+    .from(userRoles)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(eq(userRoles.userId, userId));
+
+  return {
+    ...user,
+    roles: roleRows.map((r) => r.name),
+  };
+}
+
+export async function changePassword(
+  userId: string,
+  data: {
+    currentPassword: string;
+    newPassword: string;
+  }
+) {
+  const userResult = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const user = userResult[0];
+  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user.passwordHash) throw new Error("PASSWORD_NOT_SET");
+
+  const isValid = await comparePassword(
+    data.currentPassword,
+    user.passwordHash
+  );
+  if (!isValid) throw new Error("INVALID_CURRENT_PASSWORD");
+
+  const sameAsOld = await comparePassword(data.newPassword, user.passwordHash);
+  if (sameAsOld) throw new Error("PASSWORD_SAME_AS_OLD");
+
+  const newHash = await hashPassword(data.newPassword);
+
+  await db
+    .update(users)
+    .set({ passwordHash: newHash, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+
+  return { success: true, reloginRequired: true };
+}
+
+export async function updateUserProfile(
+  userId: string,
+  data: UpdateProfileInput
+) {
+  if (Object.keys(data).length === 0) throw new Error("NO_FIELDS_TO_UPDATE");
+
+  await db
+    .update(users)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+}
+
+export async function replaceUserAvatar(userId: string, newFilePath: string) {
+  const userResult = await db
+    .select({ avatarUrl: users.avatarUrl })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  const user = userResult[0];
+  const oldAvatarUrl = user?.avatarUrl;
+
+  const newAvatarUrl = buildFileUrl(newFilePath);
+
+  await db
+    .update(users)
+    .set({
+      avatarUrl: newAvatarUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  if (oldAvatarUrl && oldAvatarUrl.startsWith("/uploads/"))
+    deleteLocalFile(oldAvatarUrl);
+
+  return newAvatarUrl;
+}
+
+export async function deactivateAccount(userId: string) {
+  await db
+    .update(users)
+    .set({
+      isActive: false,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+
+  return { success: true };
+}

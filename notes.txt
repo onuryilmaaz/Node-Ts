@@ -1,0 +1,2 @@
+bunx drizzle-kit generate
+bunx drizzle-kit migrate
