@@ -16,8 +16,10 @@ export async function getUserProfile(userId: string) {
       phone: users.phone,
       avatarUrl: users.avatarUrl,
       authProvider: users.authProvider,
+      providerId: users.providerId,
       isActive: users.isActive,
       createdAt: users.createdAt,
+      updatedAt: users.updatedAt,
     })
     .from(users)
     .where(eq(users.id, userId))

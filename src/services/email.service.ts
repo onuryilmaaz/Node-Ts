@@ -12,6 +12,10 @@ export async function sendEmail(input: {
   html: string;
   text?: string;
 }) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log("OTP:");
+    return;
+  }
   const from = getEmailFrom();
   const { data, error } = await resend.emails.send({
     from,
