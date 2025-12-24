@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { roles, sessions, userRoles, users } from "../../db/schema";
 
@@ -287,4 +287,55 @@ export async function removeRoleFromUser(userId: string, roleId: string) {
   }
 
   return { success: true };
+}
+
+export async function adminDashboardStats() {
+  const [
+    totalUsers,
+    activeUsers,
+    inactiveUsers,
+    verifiedUsers,
+    recentUsers,
+    activeSessions,
+  ] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(users),
+
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.isActive, true)),
+
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.isActive, false)),
+
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.emailVerified, true)),
+
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(gt(users.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))),
+
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(sessions)
+      .where(isNull(sessions.revokedAt)),
+  ]);
+
+  return {
+    users: {
+      total: totalUsers[0]?.count ?? 0,
+      active: activeUsers[0]?.count ?? 0,
+      inactive: inactiveUsers[0]?.count ?? 0,
+      emailVerified: verifiedUsers[0]?.count ?? 0,
+      last24h: recentUsers[0]?.count ?? 0,
+    },
+    sessions: {
+      active: activeSessions[0]?.count ?? 0,
+    },
+  };
 }

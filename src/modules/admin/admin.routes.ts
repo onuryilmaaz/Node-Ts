@@ -8,6 +8,7 @@ import {
   createRoleController,
   deactivateUser,
   deleteRoleController,
+  getAdminDashboard,
   getUserDetail,
   healthy,
   listRoles,
@@ -38,5 +39,7 @@ router.post("/users/:userId/activate", activateUser);
 router.post("/users/:userId/deactivate", deactivateUser);
 router.post("/users/:userId/sessions/revoke-all", revokeAllUserSessions);
 router.get("/users/:userId", getUserDetail);
+
+router.get("/dashboard", getAdminDashboard);
 
 export default router;

@@ -7,6 +7,7 @@ import {
 } from "./admin.schema";
 import {
   adminActivateUser,
+  adminDashboardStats,
   adminDeactivateUser,
   adminGetUserDetail,
   adminListUserSessions,
@@ -282,5 +283,14 @@ export async function removeRoleFromUserController(
       return res.status(400).json({ message: "Role not assigned to user" });
 
     res.status(500).json({ message: "Failed to remove role" });
+  }
+}
+
+export async function getAdminDashboard(req: Request, res: Response) {
+  try {
+    const stats = await adminDashboardStats();
+    res.json(stats);
+  } catch {
+    res.status(500).json({ message: "Failed to load dashboard stats" });
   }
 }
