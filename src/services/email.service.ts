@@ -1,4 +1,4 @@
-import { resend } from "./resend.client";
+import { transporter } from "./nodemailer.client";
 
 function getEmailFrom(): string {
   const from = process.env.EMAIL_FROM;
@@ -12,23 +12,23 @@ export async function sendEmail(input: {
   html: string;
   text?: string;
 }) {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("OTP:");
-    return;
-  }
-  const from = getEmailFrom();
-  const { data, error } = await resend.emails.send({
-    from,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-    text: input.text,
-  });
+  // if (process.env.NODE_ENV !== "production") {
+  //   console.log("OTP EMAIL (DEV MODE)");
+  //   return;
+  // }
 
-  if (error) {
-    console.log("RESEND_ERROR:", error);
+  const from = getEmailFrom();
+
+  try {
+    await transporter.sendMail({
+      from,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    });
+  } catch (err) {
+    console.log("NODEMAILER_ERROR:", err);
     throw new Error("EMAIL_SEND_FAILED");
   }
-
-  return data;
 }
