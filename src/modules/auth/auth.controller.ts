@@ -57,9 +57,26 @@ export async function login(req: Request, res: Response) {
     });
 
     res.json(result);
-  } catch {
-    res.status(401).json({
-      message: "Invalid email or password",
+  } catch (err: any) {
+    if (err.message === "ACCOUNT_DEACTIVATED") {
+      return res.status(403).json({
+        message:
+          "Hesabınız pasif durumdadır. Lütfen yönetici ile iletişime geçin.",
+        code: "ACCOUNT_DEACTIVATED",
+      });
+    }
+
+    if (err.message === "INVALID_CREDENTIALS") {
+      return res.status(401).json({
+        message: "E-posta veya şifre hatalı.",
+        code: "INVALID_CREDENTIALS",
+      });
+    }
+
+    console.error("LOGIN ERROR:", err);
+
+    return res.status(500).json({
+      message: "Sunucu hatası",
     });
   }
 }
