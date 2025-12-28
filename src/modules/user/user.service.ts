@@ -4,6 +4,8 @@ import { users, roles, userRoles, sessions } from "../../db/schema";
 import { comparePassword, hashPassword } from "../../utils/hash";
 import { buildFileUrl, deleteLocalFile } from "../../services/file.service";
 import type { UpdateProfileInput } from "./user.schema";
+import cloudinary from "../../utils/cloudinary";
+import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 
 export async function getUserProfile(userId: string) {
   const userResult = await db
@@ -98,30 +100,40 @@ export async function updateUserProfile(
     .where(eq(users.id, userId));
 }
 
-export async function replaceUserAvatar(userId: string, newFilePath: string) {
+export async function uploadAvatarService(
+  userId: string,
+  file: Express.Multer.File
+) {
+  // Kullanıcıyı al
   const userResult = await db
-    .select({ avatarUrl: users.avatarUrl })
+    .select({
+      avatarPublicId: users.avatarPublicId,
+    })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
 
-  const user = userResult[0];
-  const oldAvatarUrl = user?.avatarUrl;
+  const oldAvatarPublicId = userResult[0]?.avatarPublicId;
 
-  const newAvatarUrl = buildFileUrl(newFilePath);
+  // Cloudinary upload
+  const uploadResult = await uploadToCloudinary(file.buffer, "avatars");
 
+  // Eski avatar varsa sil
+  if (oldAvatarPublicId) {
+    await cloudinary.uploader.destroy(oldAvatarPublicId);
+  }
+
+  // DB update
   await db
     .update(users)
     .set({
-      avatarUrl: newAvatarUrl,
+      avatarUrl: uploadResult.url,
+      avatarPublicId: uploadResult.publicId,
       updatedAt: new Date(),
     })
     .where(eq(users.id, userId));
 
-  if (oldAvatarUrl && oldAvatarUrl.startsWith("/uploads/"))
-    deleteLocalFile(oldAvatarUrl);
-
-  return newAvatarUrl;
+  return uploadResult.url;
 }
 
 export async function deactivateAccount(userId: string) {

@@ -12,6 +12,7 @@ export const users = appSchema.table("users", {
 
   phone: text("phone"),
   avatarUrl: text("avatar_url"),
+  avatarPublicId: text("avatar_public_id"),
 
   authProvider: text("auth_provider").notNull().default("local"),
   providerId: text("provider_id"),

@@ -3,8 +3,8 @@ import {
   changePassword,
   deactivateAccount,
   getUserProfile,
-  replaceUserAvatar,
   updateUserProfile,
+  uploadAvatarService,
 } from "./user.service";
 import { changePasswordSchema, updateProfileSchema } from "./user.schema";
 import { buildFileUrl } from "../../services/file.service";
@@ -66,11 +66,15 @@ export async function changePasswordController(req: Request, res: Response) {
 }
 
 export async function uploadAvatar(req: Request, res: Response) {
-  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 
-  if (!req.file) return res.status(400).json({ message: "File required" });
+  if (!req.file) {
+    return res.status(400).json({ message: "File required" });
+  }
 
-  const avatarUrl = await replaceUserAvatar(req.user.userId, req.file.path);
+  const avatarUrl = await uploadAvatarService(req.user.userId, req.file);
 
   res.json({ avatarUrl });
 }
