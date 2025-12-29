@@ -2,14 +2,14 @@ FROM oven/bun:1.1.7
 
 WORKDIR /app
 
-COPY bun.lockb package.json ./
+COPY package.json bun.lockb ./
 RUN bun install --production
 
-COPY . .
+COPY src ./src
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["bun", "run", "src/index.ts"]
+CMD ["bun", "run", "start"]
