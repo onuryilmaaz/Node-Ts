@@ -16,8 +16,8 @@ export async function sendEmail({
       "https://api.brevo.com/v3/smtp/email",
       {
         sender: {
-          name: "My App",
-          email: "onuryilm.41@10421924.brevosend.com",
+          name: "Api",
+          email: "onuryilm.41@gmail.com",
         },
         to: [{ email: to }],
         subject,
