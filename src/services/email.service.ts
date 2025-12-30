@@ -1,29 +1,37 @@
-import { transporter } from "./nodemailer.client";
+import axios from "axios";
 
-function getEmailFrom(): string {
-  const from = process.env.EMAIL_FROM;
-  if (!from) throw new Error("EMAIL_FROM is missing");
-  return from;
-}
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
-export async function sendEmail(input: {
+export async function sendEmail({
+  to,
+  subject,
+  html,
+}: {
   to: string;
   subject: string;
   html: string;
-  text?: string;
 }) {
-  const from = getEmailFrom();
-
   try {
-    await transporter.sendMail({
-      from,
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text ?? "",
-    });
+    await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          name: "My App",
+          email: "noreply@senindomain.com",
+        },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      },
+      {
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
   } catch (err: any) {
-    console.error("NODEMAILER_ERROR:", err?.message || err);
+    console.error("BREVO_API_ERROR:", err.response?.data || err.message);
     throw new Error("EMAIL_SEND_FAILED");
   }
 }

@@ -32,7 +32,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 app.post("/test-mail", async (req, res) => {
   await sendEmail({
-    to: "test@gmail.com",
+    to: "onuryilm.41@gmail.com",
     subject: "Brevo Test Mail",
     html: "<h2>Mail başarıyla gönderildi 🚀</h2>",
   });
