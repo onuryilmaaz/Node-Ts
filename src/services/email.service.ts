@@ -17,7 +17,7 @@ export async function sendEmail({
       {
         sender: {
           name: "My App",
-          email: "no-reply@brevo.com",
+          email: "onuryilm.41@10421924.brevosend.com",
         },
         to: [{ email: to }],
         subject,
