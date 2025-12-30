@@ -9,6 +9,7 @@ import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/user/user.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import { authMiddleware } from "./middleware/auth.middleware";
+import { sendEmail } from "./services/email.service";
 
 const app = express();
 
@@ -27,6 +28,16 @@ app.get("/health", (req: Request, res: Response) => {
     runtime: "bun",
     ts: true,
   });
+});
+
+app.post("/test-mail", async (req, res) => {
+  await sendEmail({
+    to: "test@gmail.com",
+    subject: "Brevo Test Mail",
+    html: "<h2>Mail başarıyla gönderildi 🚀</h2>",
+  });
+
+  res.json({ ok: true });
 });
 
 app.get("/me", authMiddleware, (req, res) => {

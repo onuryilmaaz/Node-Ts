@@ -12,11 +12,6 @@ export async function sendEmail(input: {
   html: string;
   text?: string;
 }) {
-  // if (process.env.NODE_ENV !== "production") {
-  //   console.log("OTP EMAIL (DEV MODE)");
-  //   return;
-  // }
-
   const from = getEmailFrom();
 
   try {
@@ -25,10 +20,10 @@ export async function sendEmail(input: {
       to: input.to,
       subject: input.subject,
       html: input.html,
-      text: input.text,
+      text: input.text ?? "",
     });
-  } catch (err) {
-    console.log("NODEMAILER_ERROR:", err);
+  } catch (err: any) {
+    console.error("NODEMAILER_ERROR:", err?.message || err);
     throw new Error("EMAIL_SEND_FAILED");
   }
 }
