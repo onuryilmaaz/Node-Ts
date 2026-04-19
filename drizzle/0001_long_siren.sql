@@ -1,1 +1,0 @@
-ALTER TYPE "app"."otp_type" ADD VALUE 'email_change';

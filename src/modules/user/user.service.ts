@@ -1,46 +1,30 @@
-import { db } from "../../db";
-import { and, eq, isNull } from "drizzle-orm";
-import { users, roles, userRoles, sessions } from "../../db/schema";
+import { query } from "../../db";
 import { comparePassword, hashPassword } from "../../utils/hash";
-import { buildFileUrl, deleteLocalFile } from "../../services/file.service";
-import type { UpdateProfileInput } from "./user.schema";
 import cloudinary from "../../utils/cloudinary";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
+import type { UpdateProfileInput } from "./user.schema";
 
 export async function getUserProfile(userId: string) {
-  const userResult = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      emailVerified: users.emailVerified,
-      firstName: users.firstName,
-      lastName: users.lastName,
-      phone: users.phone,
-      avatarUrl: users.avatarUrl,
-      authProvider: users.authProvider,
-      providerId: users.providerId,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-      updatedAt: users.updatedAt,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const userResult = await query(
+    `SELECT id, email, email_verified as "emailVerified", first_name as "firstName", 
+            last_name as "lastName", phone, avatar_url as "avatarUrl", 
+            auth_provider as "authProvider", provider_id as "providerId", 
+            is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
+     FROM app.users WHERE id = $1 LIMIT 1`,
+    [userId]
+  );
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("USER_NOT_FOUND");
 
-  const roleRows = await db
-    .select({
-      name: roles.name,
-    })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(eq(userRoles.userId, userId));
+  const roleRows = await query(
+    "SELECT r.name FROM app.user_roles ur INNER JOIN app.roles r ON ur.role_id = r.id WHERE ur.user_id = $1",
+    [userId]
+  );
 
   return {
     ...user,
-    roles: roleRows.map((r) => r.name),
+    roles: roleRows.rows.map((r: any) => r.name),
   };
 }
 
@@ -51,13 +35,9 @@ export async function changePassword(
     newPassword: string;
   }
 ) {
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const userResult = await query("SELECT id, password_hash as \"passwordHash\" FROM app.users WHERE id = $1 LIMIT 1", [userId]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("USER_NOT_FOUND");
   if (!user.passwordHash) throw new Error("PASSWORD_NOT_SET");
 
@@ -72,15 +52,9 @@ export async function changePassword(
 
   const newHash = await hashPassword(data.newPassword);
 
-  await db
-    .update(users)
-    .set({ passwordHash: newHash, updatedAt: new Date() })
-    .where(eq(users.id, userId));
+  await query("UPDATE app.users SET password_hash = $1, updated_at = NOW() WHERE id = $2", [newHash, userId]);
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
 
   return { success: true, reloginRequired: true };
 }
@@ -89,66 +63,61 @@ export async function updateUserProfile(
   userId: string,
   data: UpdateProfileInput
 ) {
-  if (Object.keys(data).length === 0) throw new Error("NO_FIELDS_TO_UPDATE");
+  const entries = Object.entries(data);
+  if (entries.length === 0) throw new Error("NO_FIELDS_TO_UPDATE");
 
-  await db
-    .update(users)
-    .set({
-      ...data,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  // Map camelCase keys to snake_case columns
+  const columnMapping: Record<string, string> = {
+    firstName: "first_name",
+    lastName: "last_name",
+    phone: "phone",
+  };
+
+  const setClauses: string[] = [];
+  const values: any[] = [];
+  
+  entries.forEach(([key, value], index) => {
+    const colName = columnMapping[key] || key;
+    setClauses.push(`${colName} = $${index + 1}`);
+    values.push(value);
+  });
+
+  values.push(userId);
+  const sql = `UPDATE app.users SET ${setClauses.join(", ")}, updated_at = NOW() WHERE id = $${values.length}`;
+
+  await query(sql, values);
 }
 
 export async function uploadAvatarService(
   userId: string,
   file: Express.Multer.File
 ) {
-  // Kullanıcıyı al
-  const userResult = await db
-    .select({
-      avatarPublicId: users.avatarPublicId,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const userResult = await query("SELECT avatar_public_id as \"avatarPublicId\" FROM app.users WHERE id = $1 LIMIT 1", [userId]);
 
-  const oldAvatarPublicId = userResult[0]?.avatarPublicId;
+  const oldAvatarPublicId = userResult.rows[0]?.avatarPublicId;
 
-  // Cloudinary upload
   const uploadResult = await uploadToCloudinary(file.buffer, "avatars");
 
-  // Eski avatar varsa sil
   if (oldAvatarPublicId) {
-    await cloudinary.uploader.destroy(oldAvatarPublicId);
+    try {
+      await cloudinary.uploader.destroy(oldAvatarPublicId);
+    } catch (err) {
+      console.error("Old avatar delete failed:", err);
+    }
   }
 
-  // DB update
-  await db
-    .update(users)
-    .set({
-      avatarUrl: uploadResult.url,
-      avatarPublicId: uploadResult.publicId,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  await query(
+    "UPDATE app.users SET avatar_url = $1, avatar_public_id = $2, updated_at = NOW() WHERE id = $3",
+    [uploadResult.url, uploadResult.publicId, userId]
+  );
 
   return uploadResult.url;
 }
 
 export async function deactivateAccount(userId: string) {
-  await db
-    .update(users)
-    .set({
-      isActive: false,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  await query("UPDATE app.users SET is_active = false, updated_at = NOW() WHERE id = $1", [userId]);
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
 
   return { success: true };
 }

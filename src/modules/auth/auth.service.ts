@@ -1,9 +1,7 @@
-import { db } from "../../db";
-import { and, eq, gt, is, isNull, lt, ne } from "drizzle-orm";
-import { hashPassword, comparePassword } from "../../utils/hash";
+import { query } from "../../db";
+import { hashPassword } from "../../utils/hash";
 import { signAccessToken } from "../../utils/jwt";
 import { generateRefreshToken, hashRefreshToken } from "../../utils/token";
-import { sessions, users, roles, userRoles, otps } from "../../db/schema";
 import { generateOtp, hashOtp, otpExpiresAt } from "../../utils/otp";
 import { verifyEmailTemplate } from "../../templates/verify-email.template";
 import { sendEmail } from "../../services/email.service";
@@ -16,65 +14,42 @@ export async function registerUser(data: {
   firstName: string;
   lastName: string;
 }) {
-  const existing = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const existing = await query("SELECT id FROM app.users WHERE email = $1 LIMIT 1", [data.email]);
 
-  if (existing.length > 0) throw new Error("EMAIL_EXISTS");
+  if (existing.rowCount && existing.rowCount > 0) throw new Error("EMAIL_EXISTS");
 
   const passwordHash = await hashPassword(data.password);
 
-  const result = await db
-    .insert(users)
-    .values({
-      email: data.email,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      passwordHash,
-      authProvider: "local",
-    })
-    .returning();
+  const result = await query(
+    `INSERT INTO app.users (email, first_name, last_name, password_hash, auth_provider) 
+     VALUES ($1, $2, $3, $4, $5) 
+     RETURNING id, email, first_name as "firstName", last_name as "lastName", email_verified as "emailVerified"`,
+    [data.email, data.firstName, data.lastName, passwordHash, "local"]
+  );
 
-  const user = result[0];
+  const user = result.rows[0];
 
   if (!user) throw new Error("USER_CREATE_FAILED");
 
-  const roleResult = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.name, "user"))
-    .limit(1);
+  const roleResult = await query("SELECT id FROM app.roles WHERE name = $1 LIMIT 1", ["user"]);
 
-  const role = roleResult[0];
+  const role = roleResult.rows[0];
   if (!role) throw new Error("DEFAULT_ROLE_NOT_FOUND");
 
-  await db.insert(userRoles).values({
-    userId: user.id,
-    roleId: role.id,
-  });
+  await query("INSERT INTO app.user_roles (user_id, role_id) VALUES ($1, $2)", [user.id, role.id]);
 
   const otp = generateOtp();
   const otpHash = hashOtp(otp);
 
-  await db
-    .update(otps)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_verify"),
-        isNull(otps.usedAt)
-      )
-    );
+  await query(
+    "UPDATE app.otps SET used_at = NOW() WHERE user_id = $1 AND type = $2 AND used_at IS NULL",
+    [user.id, "email_verify"]
+  );
 
-  await db.insert(otps).values({
-    userId: user.id,
-    otpHash,
-    type: "email_verify",
-    expiresAt: otpExpiresAt(10),
-  });
+  await query(
+    "INSERT INTO app.otps (user_id, otp_hash, type, expires_at) VALUES ($1, $2, $3, $4)",
+    [user.id, otpHash, "email_verify", otpExpiresAt(10)]
+  );
 
   console.log(`EMAIL OTP for ${user.email}: ${otp}`);
   const tpl = verifyEmailTemplate({ otp, minutes: 10 });
@@ -90,7 +65,7 @@ export async function registerUser(data: {
     console.error("[REGISTER] Email gönderilemedi, ama kayıt tamamlandı:", emailErr.message);
   }
 
-  return result[0];
+  return user;
 }
 
 export async function loginUser(data: {
@@ -98,13 +73,13 @@ export async function loginUser(data: {
   password: string;
   userAgent: string | null;
 }) {
-  const result = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const result = await query(
+    `SELECT id, email, password_hash as "passwordHash", is_active as "isActive", email_verified as "emailVerified" 
+     FROM app.users WHERE email = $1 LIMIT 1`,
+    [data.email]
+  );
 
-  const user = result[0];
+  const user = result.rows[0];
   console.log("USER FROM DB:", user);
 
   if (!user || !user.passwordHash) throw new Error("INVALID_CREDENTIALS");
@@ -117,13 +92,12 @@ export async function loginUser(data: {
 
   if (!ok) throw new Error("INVALID_CREDENTIALS");
 
-  const roleRows = await db
-    .select({ name: roles.name })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(eq(userRoles.userId, user.id));
+  const roleRows = await query(
+    "SELECT r.name FROM app.user_roles ur INNER JOIN app.roles r ON ur.role_id = r.id WHERE ur.user_id = $1",
+    [user.id]
+  );
 
-  const rolesNames = roleRows.map((r) => r.name);
+  const rolesNames = roleRows.rows.map((r: any) => r.name);
 
   const accessToken = signAccessToken({
     userId: user.id,
@@ -138,13 +112,10 @@ export async function loginUser(data: {
 
   const refreshExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7); // 7 Gün
 
-  await db.insert(sessions).values({
-    userId: user.id,
-    refreshTokenHash,
-    expiresAt: refreshExpiresAt,
-    ipAddress: null,
-    userAgent: data.userAgent,
-  });
+  await query(
+    "INSERT INTO app.sessions (user_id, refresh_token_hash, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+    [user.id, refreshTokenHash, refreshExpiresAt, data.userAgent]
+  );
 
   return {
     user: {
@@ -164,33 +135,22 @@ export async function refreshSession(data: {
 }) {
   const hash = hashRefreshToken(data.refreshToken);
 
-  const sessionResult = await db
-    .select()
-    .from(sessions)
-    .where(
-      and(
-        eq(sessions.refreshTokenHash, hash),
-        isNull(sessions.revokedAt),
-        gt(sessions.expiresAt, new Date())
-      )
-    )
-    .limit(1);
+  const sessionResult = await query(
+    "SELECT id, user_id as \"userId\" FROM app.sessions WHERE refresh_token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW() LIMIT 1",
+    [hash]
+  );
 
-  const session = sessionResult[0];
+  const session = sessionResult.rows[0];
   if (!session) throw new Error("INVALID_REFRESH");
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(eq(sessions.id, session.id));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE id = $1", [session.id]);
 
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
+  const userResult = await query(
+    "SELECT id, email, email_verified as \"emailVerified\" FROM app.users WHERE id = $1 LIMIT 1",
+    [session.userId]
+  );
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("INVALID_REFRESH");
 
   const roles = await getUserRoles(user.id);
@@ -206,12 +166,10 @@ export async function refreshSession(data: {
   const newRefreshToken = generateRefreshToken();
   const newHash = hashRefreshToken(newRefreshToken);
 
-  await db.insert(sessions).values({
-    userId: user.id,
-    refreshTokenHash: newHash,
-    expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
-    userAgent: data.userAgent,
-  });
+  await query(
+    "INSERT INTO app.sessions (user_id, refresh_token_hash, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+    [user.id, newHash, new Date(Date.now() + 1000 * 60 * 60 * 24 * 7), data.userAgent]
+  );
 
   return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 }
@@ -219,123 +177,80 @@ export async function refreshSession(data: {
 export async function logoutUser(refreshToken: string) {
   const hash = hashRefreshToken(refreshToken);
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(eq(sessions.refreshTokenHash, hash), isNull(sessions.revokedAt))
-    );
+  await query(
+    "UPDATE app.sessions SET revoked_at = NOW() WHERE refresh_token_hash = $1 AND revoked_at IS NULL",
+    [hash]
+  );
 }
 
 async function getUserRoles(userId: string): Promise<string[]> {
-  const rows = await db
-    .select({ name: roles.name })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(eq(userRoles.userId, userId));
+  const rows = await query(
+    "SELECT r.name FROM app.user_roles ur INNER JOIN app.roles r ON ur.role_id = r.id WHERE ur.user_id = $1",
+    [userId]
+  );
 
-  return rows.map((r) => r.name);
+  return rows.rows.map((r: any) => r.name);
 }
 
 export async function verifyEmailOtp(data: { email: string; code: string }) {
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const userResult = await query("SELECT id FROM app.users WHERE email = $1 LIMIT 1", [data.email]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("INVALID_CODE");
 
   const otpHash = hashOtp(data.code);
 
-  const otpResult = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_verify"),
-        eq(otps.otpHash, otpHash),
-        isNull(otps.usedAt),
-        gt(otps.expiresAt, new Date())
-      )
-    )
-    .limit(1);
+  const otpResult = await query(
+    `SELECT id FROM app.otps 
+     WHERE user_id = $1 AND type = $2 AND otp_hash = $3 AND used_at IS NULL AND expires_at > NOW() 
+     LIMIT 1`,
+    [user.id, "email_verify", otpHash]
+  );
 
-  const otp = otpResult[0];
+  const otp = otpResult.rows[0];
   if (!otp) throw new Error("INVALID_CODE");
 
-  await db.update(otps).set({ usedAt: new Date() }).where(eq(otps.id, otp.id));
+  await query("UPDATE app.otps SET used_at = NOW() WHERE id = $1", [otp.id]);
 
-  await db
-    .update(users)
-    .set({ emailVerified: true })
-    .where(eq(users.id, user.id));
+  await query("UPDATE app.users SET email_verified = true WHERE id = $1", [user.id]);
 
   return { success: true };
 }
 
 export async function resendEmailOtp(data: { email: string }) {
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const userResult = await query("SELECT id, email, email_verified as \"emailVerified\" FROM app.users WHERE email = $1 LIMIT 1", [data.email]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) return;
 
   if (user.emailVerified) return;
 
-  const recentOtp = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_verify"),
-        isNull(otps.usedAt),
-        gt(otps.createdAt, new Date(Date.now() - 60_000))
-      )
-    )
-    .limit(1);
+  const recentOtp = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND used_at IS NULL AND created_at > NOW() - INTERVAL '1 minute' LIMIT 1",
+    [user.id, "email_verify"]
+  );
 
-  if (recentOtp[0]) throw new Error("OTP_RATE_LIMIT");
+  if (recentOtp.rowCount && recentOtp.rowCount > 0) throw new Error("OTP_RATE_LIMIT");
 
-  const todayCount = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_verify"),
-        gt(otps.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))
-      )
-    );
+  const todayCount = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND created_at > NOW() - INTERVAL '1 day'",
+    [user.id, "email_verify"]
+  );
 
-  if (todayCount.length >= 5) throw new Error("OTP_DAILY_LIMIT");
+  if (todayCount.rowCount && todayCount.rowCount >= 5) throw new Error("OTP_DAILY_LIMIT");
 
-  await db
-    .update(otps)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_verify"),
-        isNull(otps.usedAt)
-      )
-    );
+  await query(
+    "UPDATE app.otps SET used_at = NOW() WHERE user_id = $1 AND type = $2 AND used_at IS NULL",
+    [user.id, "email_verify"]
+  );
 
   const otp = generateOtp();
   const otpHash = hashOtp(otp);
 
-  await db.insert(otps).values({
-    userId: user.id,
-    otpHash,
-    type: "email_verify",
-    expiresAt: otpExpiresAt(10),
-  });
+  await query(
+    "INSERT INTO app.otps (user_id, otp_hash, type, expires_at) VALUES ($1, $2, $3, $4)",
+    [user.id, otpHash, "email_verify", otpExpiresAt(10)]
+  );
 
   console.log(`RESEND OTP for ${user.email}: ${otp}`);
   const tpl = verifyEmailTemplate({ otp, minutes: 10 });
@@ -349,63 +264,37 @@ export async function resendEmailOtp(data: { email: string }) {
 }
 
 export async function forgotPassword(data: { email: string }) {
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const userResult = await query("SELECT id, email FROM app.users WHERE email = $1 LIMIT 1", [data.email]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) return;
 
-  const recent = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "password_reset"),
-        isNull(otps.usedAt),
-        gt(otps.createdAt, new Date(Date.now() - 60_000))
-      )
-    )
-    .limit(1);
+  const recent = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND used_at IS NULL AND created_at > NOW() - INTERVAL '1 minute' LIMIT 1",
+    [user.id, "password_reset"]
+  );
 
-  if (recent[0]) throw new Error("OTP_RATE_LIMIT");
+  if (recent.rowCount && recent.rowCount > 0) throw new Error("OTP_RATE_LIMIT");
 
-  const today = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "password_reset"),
-        gt(otps.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))
-      )
-    );
+  const today = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND created_at > NOW() - INTERVAL '1 day'",
+    [user.id, "password_reset"]
+  );
 
-  if (today.length >= 5) throw new Error("OTP_DAILY_LIMIT");
+  if (today.rowCount && today.rowCount >= 5) throw new Error("OTP_DAILY_LIMIT");
 
-  await db
-    .update(otps)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "password_reset"),
-        isNull(otps.usedAt)
-      )
-    );
+  await query(
+    "UPDATE app.otps SET used_at = NOW() WHERE user_id = $1 AND type = $2 AND used_at IS NULL",
+    [user.id, "password_reset"]
+  );
 
   const otp = generateOtp();
   const otpHash = hashOtp(otp);
 
-  await db.insert(otps).values({
-    userId: user.id,
-    otpHash,
-    type: "password_reset",
-    expiresAt: otpExpiresAt(10),
-  });
+  await query(
+    "INSERT INTO app.otps (user_id, otp_hash, type, expires_at) VALUES ($1, $2, $3, $4)",
+    [user.id, otpHash, "password_reset", otpExpiresAt(10)]
+  );
 
   const tpl = resetPasswordTemplate({ otp, minutes: 10 });
 
@@ -422,89 +311,54 @@ export async function resetPassword(data: {
   otp: string;
   newPassword: string;
 }) {
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, data.email))
-    .limit(1);
+  const userResult = await query("SELECT id FROM app.users WHERE email = $1 LIMIT 1", [data.email]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("INVALID_OTP");
 
   const otpHash = hashOtp(data.otp);
 
-  const otpResult = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "password_reset"),
-        eq(otps.otpHash, otpHash),
-        isNull(otps.usedAt),
-        gt(otps.expiresAt, new Date())
-      )
-    )
-    .limit(1);
+  const otpResult = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND otp_hash = $3 AND used_at IS NULL AND expires_at > NOW() LIMIT 1",
+    [user.id, "password_reset", otpHash]
+  );
 
-  const otp = otpResult[0];
+  const otp = otpResult.rows[0];
   if (!otp) throw new Error("INVALID_OTP");
 
   const newHash = await hashPassword(data.newPassword);
 
-  await db
-    .update(users)
-    .set({ passwordHash: newHash })
-    .where(eq(users.id, user.id));
+  await query("UPDATE app.users SET password_hash = $1 WHERE id = $2", [newHash, user.id]);
 
-  await db.update(otps).set({ usedAt: new Date() }).where(eq(otps.id, otp.id));
+  await query("UPDATE app.otps SET used_at = NOW() WHERE id = $1", [otp.id]);
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(eq(sessions.userId, user.id));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1", [user.id]);
 
   return { success: true };
 }
 
 export async function requestChangeEmail(userId: string, newEmail: string) {
-  const existing = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, newEmail))
-    .limit(1);
+  const existing = await query("SELECT id FROM app.users WHERE email = $1 LIMIT 1", [newEmail]);
 
-  if (existing[0]) throw new Error("EMAIL_IN_USE");
+  if (existing.rowCount && existing.rowCount > 0) throw new Error("EMAIL_IN_USE");
 
-  const userResult = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const userResult = await query("SELECT id, email FROM app.users WHERE id = $1 LIMIT 1", [userId]);
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("USER_NOT_FOUND");
 
-  await db
-    .update(otps)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(otps.userId, user.id),
-        eq(otps.type, "email_change"),
-        isNull(otps.usedAt)
-      )
-    );
+  await query(
+    "UPDATE app.otps SET used_at = NOW() WHERE user_id = $1 AND type = $2 AND used_at IS NULL",
+    [user.id, "email_change"]
+  );
 
   const otp = generateOtp();
   const otpHash = hashOtp(otp);
 
-  await db.insert(otps).values({
-    userId: user.id,
-    otpHash,
-    type: "email_change",
-    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-  });
+  await query(
+    "INSERT INTO app.otps (user_id, otp_hash, type, expires_at) VALUES ($1, $2, $3, $4)",
+    [user.id, otpHash, "email_change", new Date(Date.now() + 10 * 60 * 1000)]
+  );
 
   const tpl = changeEmailTemplate({ otp, minutes: 10 });
 
@@ -523,69 +377,42 @@ export async function confirmChangeEmail(
 ) {
   const otpHash = hashOtp(otpCode);
 
-  const otpResult = await db
-    .select()
-    .from(otps)
-    .where(
-      and(
-        eq(otps.userId, userId),
-        eq(otps.type, "email_change"),
-        eq(otps.otpHash, otpHash),
-        isNull(otps.usedAt),
-        gt(otps.expiresAt, new Date())
-      )
-    )
-    .limit(1);
+  const otpResult = await query(
+    "SELECT id FROM app.otps WHERE user_id = $1 AND type = $2 AND otp_hash = $3 AND used_at IS NULL AND expires_at > NOW() LIMIT 1",
+    [userId, "email_change", otpHash]
+  );
 
-  const otp = otpResult[0];
+  const otp = otpResult.rows[0];
   if (!otp) throw new Error("INVALID_OTP");
 
-  await db.update(otps).set({ usedAt: new Date() }).where(eq(otps.id, otp.id));
+  await query("UPDATE app.otps SET used_at = NOW() WHERE id = $1", [otp.id]);
 
-  await db
-    .update(users)
-    .set({
-      email: newEmail,
-      emailVerified: true,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  await query(
+    "UPDATE app.users SET email = $1, email_verified = true, updated_at = NOW() WHERE id = $2",
+    [newEmail, userId]
+  );
 
   await revokeAllUserSessions(userId);
 }
 
 export async function revokeAllUserSessions(userId: string) {
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
 }
 
 export async function listUserSessions(userId: string) {
-  return await db
-    .select({
-      id: sessions.id,
-      createdAt: sessions.createdAt,
-      expiresAt: sessions.expiresAt,
-      userAgent: sessions.userAgent,
-      revokedAt: sessions.revokedAt,
-    })
-    .from(sessions)
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
-    .orderBy(sessions.createdAt);
+  const result = await query(
+    `SELECT id, created_at as "createdAt", expires_at as "expiresAt", user_agent as "userAgent", revoked_at as "revokedAt" 
+     FROM app.sessions WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at`,
+    [userId]
+  );
+  return result.rows;
 }
 
 export async function revokeSession(userId: string, sessionId: string) {
-  const result = await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(sessions.id, sessionId),
-        eq(sessions.userId, userId),
-        isNull(sessions.revokedAt)
-      )
-    );
+  const result = await query(
+    "UPDATE app.sessions SET revoked_at = NOW() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL",
+    [sessionId, userId]
+  );
 
   if (result.rowCount === 0) {
     throw new Error("SESSION_NOT_FOUND");
@@ -600,23 +427,14 @@ export async function revokeOtherSessions(
 ) {
   const currentHash = hashRefreshToken(currentRefreshToken);
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(sessions.userId, userId),
-        isNull(sessions.revokedAt),
-        ne(sessions.refreshTokenHash, currentHash)
-      )
-    );
+  await query(
+    "UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL AND refresh_token_hash != $2",
+    [userId, currentHash]
+  );
 
   return { success: true };
 }
 
 export async function cleanupExpiredSessions() {
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(lt(sessions.expiresAt, new Date()), isNull(sessions.revokedAt)));
+  await query("UPDATE app.sessions SET revoked_at = NOW() WHERE expires_at < NOW() AND revoked_at IS NULL");
 }

@@ -1,32 +1,34 @@
-import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
-import { db } from "../../db";
-import { roles, sessions, userRoles, users } from "../../db/schema";
+import { query } from "../../db";
 
 export async function adminListUsers() {
-  const rows = await db
-    .select({
-      userId: users.id,
-      email: users.email,
-      emailVerified: users.emailVerified,
-      firstName: users.firstName,
-      lastName: users.lastName,
-      phone: users.phone,
-      avatarUrl: users.avatarUrl,
-      authProvider: users.authProvider,
-      providerId: users.providerId,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-      updatedAt: users.updatedAt,
-      role: roles.name,
-    })
-    .from(users)
-    .leftJoin(userRoles, eq(userRoles.userId, users.id))
-    .leftJoin(roles, eq(roles.id, userRoles.roleId))
-    .orderBy(users.createdAt);
+  const result = await query(
+    `
+    SELECT
+      u.id AS "userId",
+      u.email,
+      u.email_verified AS "emailVerified",
+      u.first_name AS "firstName",
+      u.last_name AS "lastName",
+      u.phone,
+      u.avatar_url AS "avatarUrl",
+      u.auth_provider AS "authProvider",
+      u.provider_id AS "providerId",
+      u.is_active AS "isActive",
+      u.created_at AS "createdAt",
+      u.updated_at AS "updatedAt",
+      r.name AS "role"
+    FROM app.users u
+    LEFT JOIN app.user_roles ur 
+      ON u.id = ur.user_id
+    LEFT JOIN app.roles r 
+      ON ur.role_id = r.id
+    ORDER BY u.created_at
+    `,
+  );
 
   const usersMap = new Map<string, any>();
 
-  for (const row of rows) {
+  for (const row of result.rows) {
     if (!usersMap.has(row.userId)) {
       usersMap.set(row.userId, {
         id: row.userId,
@@ -54,47 +56,50 @@ export async function adminListUsers() {
 }
 
 export async function adminGetUserDetail(userId: string) {
-  const userResult = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      emailVerified: users.emailVerified,
-      firstName: users.firstName,
-      lastName: users.lastName,
-      phone: users.phone,
-      avatarUrl: users.avatarUrl,
-      authProvider: users.authProvider,
-      providerId: users.providerId,
-      isActive: users.isActive,
-      createdAt: users.createdAt,
-      updatedAt: users.updatedAt,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const userResult = await query(
+    `SELECT
+      id,
+      email,
+      email_verified AS "emailVerified",
+      first_name AS "firstName",
+      last_name AS "lastName",
+      phone,
+      avatar_url AS "avatarUrl",
+      auth_provider AS "authProvider",
+      provider_id AS "providerId",
+      is_active AS "isActive",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+    FROM app.users
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [userId],
+  );
 
-  const user = userResult[0];
+  const user = userResult.rows[0];
   if (!user) throw new Error("USER_NOT_FOUND");
 
-  const roleRows = await db
-    .select({
-      name: roles.name,
-    })
-    .from(userRoles)
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(eq(userRoles.userId, userId));
+  const roleRows = await query(
+    "SELECT r.name FROM app.user_roles ur INNER JOIN app.roles r ON ur.role_id = r.id WHERE ur.user_id = $1",
+    [userId],
+  );
 
   return {
     ...user,
-    roles: roleRows.map((r) => r.name),
+    roles: roleRows.rows.map((r: any) => r.name),
   };
 }
 
 export async function adminActivateUser(userId: string) {
-  const result = await db
-    .update(users)
-    .set({ isActive: true, updatedAt: new Date() })
-    .where(eq(users.id, userId));
+  const result = await query(
+    `
+    UPDATE app.users
+    SET is_active = TRUE, updated_at = NOW()
+    WHERE id = $1
+    `,
+    [userId],
+  );
 
   if (result.rowCount === 0) throw new Error("USER_NOT_FOUND");
 
@@ -102,175 +107,168 @@ export async function adminActivateUser(userId: string) {
 }
 
 export async function adminDeactivateUser(userId: string) {
-  const result = await db
-    .update(users)
-    .set({ isActive: false, updatedAt: new Date() })
-    .where(eq(users.id, userId));
+  const result = await query(
+    `
+    UPDATE app.users
+    SET is_active = FALSE, updated_at = NOW()
+    WHERE id = $1
+    `,
+    [userId],
+  );
 
   if (result.rowCount === 0) throw new Error("USER_NOT_FOUND");
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await query(
+    "UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+    [userId],
+  );
 
   return { success: true, sessionsRevoked: true };
 }
 
 export async function adminListUserSessions(userId: string) {
-  const user = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user[0]) throw new Error("USER_NOT_FOUND");
+  const user = await query("SELECT id FROM app.users WHERE id = $1 LIMIT 1", [
+    userId,
+  ]);
+  if (!user.rowCount) throw new Error("USER_NOT_FOUND");
 
-  return db
-    .select({
-      id: sessions.id,
-      userAgent: sessions.userAgent,
-      createdAt: sessions.createdAt,
-      expiresAt: sessions.expiresAt,
-      revokedAt: sessions.revokedAt,
-    })
-    .from(sessions)
-    .where(eq(sessions.userId, userId))
-    .orderBy(sessions.createdAt);
+  const result = await query(
+    `
+    SELECT
+      id,
+      user_agent AS "userAgent",
+      created_at AS "createdAt",
+      expires_at AS "expiresAt",
+      revoked_at AS "revokedAt"
+    FROM app.sessions
+    WHERE user_id = $1
+    ORDER BY created_at
+    `,
+    [userId],
+  );
+  return result.rows;
 }
 
 export async function adminRevokeAllUserSessions(userId: string) {
-  const user = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user[0]) throw new Error("USER_NOT_FOUND");
+  const user = await query("SELECT id FROM app.users WHERE id = $1 LIMIT 1", [
+    userId,
+  ]);
+  if (!user.rowCount) throw new Error("USER_NOT_FOUND");
 
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  await query(
+    "UPDATE app.sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL",
+    [userId],
+  );
 
   return { success: true };
 }
 
 export async function getAllRoles() {
-  return await db
-    .select({
-      id: roles.id,
-      name: roles.name,
-    })
-    .from(roles)
-    .orderBy(roles.name);
+  const result = await query("SELECT id, name FROM app.roles ORDER BY name");
+  return result.rows;
 }
 
 export async function createRole(name: string) {
-  const existing = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.name, name))
-    .limit(1);
+  const existing = await query("SELECT id FROM app.roles WHERE name = $1 LIMIT 1", [
+    name,
+  ]);
 
-  if (existing[0]) throw new Error("ROLE_EXISTS");
+  if (existing.rowCount && existing.rowCount > 0)
+    throw new Error("ROLE_EXISTS");
 
-  const result = await db.insert(roles).values({ name }).returning();
+  const result = await query(
+    "INSERT INTO app.roles (name) VALUES ($1) RETURNING id, name",
+    [name],
+  );
 
-  return result[0];
+  return result.rows[0];
 }
 
 export async function updateRoleById(roleId: string, name: string) {
-  const roleResult = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, roleId))
-    .limit(1);
+  const roleResult = await query(
+    "SELECT id, name FROM app.roles WHERE id = $1 LIMIT 1",
+    [roleId],
+  );
 
-  const role = roleResult[0];
+  const role = roleResult.rows[0];
   if (!role) throw new Error("ROLE_NOT_FOUND");
   if (role.name === "admin") throw new Error("ROLE_PROTECTED");
 
-  const nameExists = await db
-    .select()
-    .from(roles)
-    .where(and(eq(roles.name, name), ne(roles.id, roleId)))
-    .limit(1);
+  const nameExists = await query(
+    "SELECT id FROM app.roles WHERE name = $1 AND id != $2 LIMIT 1",
+    [name, roleId],
+  );
 
-  if (nameExists[0]) throw new Error("ROLE_EXISTS");
+  if (nameExists.rowCount && nameExists.rowCount > 0)
+    throw new Error("ROLE_EXISTS");
 
-  const updated = await db
-    .update(roles)
-    .set({ name })
-    .where(eq(roles.id, roleId))
-    .returning();
+  const updated = await query(
+    "UPDATE app.roles SET name = $1 WHERE id = $2 RETURNING id, name",
+    [name, roleId],
+  );
 
-  return updated[0];
+  return updated.rows[0];
 }
 
 export async function deleteRoleById(roleId: string) {
-  const existing = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, roleId))
-    .limit(1);
+  const existing = await query(
+    "SELECT id, name FROM app.roles WHERE id = $1 LIMIT 1",
+    [roleId],
+  );
 
-  const role = existing[0];
+  const role = existing.rows[0];
   if (!role) throw new Error("ROLE_NOT_FOUND");
   if (role.name === "admin") throw new Error("ROLE_PROTECTED");
 
-  const usage = await db
-    .select()
-    .from(userRoles)
-    .where(eq(userRoles.roleId, roleId))
-    .limit(1);
+  const usage = await query(
+    "SELECT user_id FROM app.user_roles WHERE role_id = $1 LIMIT 1",
+    [roleId],
+  );
 
-  if (usage[0]) throw new Error("ROLE_IN_USE");
+  if (usage.rowCount && usage.rowCount > 0) throw new Error("ROLE_IN_USE");
 
-  await db.delete(roles).where(eq(roles.id, roleId));
+  await query("DELETE FROM app.roles WHERE id = $1", [roleId]);
 }
 
 export async function assignRoleToUser(userId: string, roleId: string) {
-  const user = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1)
-    .then((r) => r[0]);
+  const userResult = await query(
+    'SELECT id, is_active as "isActive" FROM app.users WHERE id = $1 LIMIT 1',
+    [userId],
+  );
+  const user = userResult.rows[0];
 
   if (!user) throw new Error("USER_NOT_FOUND");
   if (!user.isActive) throw new Error("USER_INACTIVE");
 
-  const role = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, roleId))
-    .limit(1)
-    .then((r) => r[0]);
+  const roleResult = await query("SELECT id FROM app.roles WHERE id = $1 LIMIT 1", [
+    roleId,
+  ]);
+  const role = roleResult.rows[0];
 
   if (!role) throw new Error("ROLE_NOT_FOUND");
 
-  const existing = await db
-    .select()
-    .from(userRoles)
-    .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)))
-    .limit(1);
+  const existing = await query(
+    "SELECT role_id FROM app.user_roles WHERE user_id = $1 AND role_id = $2 LIMIT 1",
+    [userId, roleId],
+  );
 
-  if (existing[0]) throw new Error("ROLE_ALREADY_ASSIGNED");
+  if (existing.rowCount && existing.rowCount > 0)
+    throw new Error("ROLE_ALREADY_ASSIGNED");
 
-  await db.insert(userRoles).values({
+  await query("INSERT INTO app.user_roles (user_id, role_id) VALUES ($1, $2)", [
     userId,
     roleId,
-  });
+  ]);
 
   return { success: true };
 }
 
 export async function removeRoleFromUser(userId: string, roleId: string) {
-  const role = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.id, roleId))
-    .limit(1)
-    .then((r) => r[0]);
+  const roleResult = await query(
+    "SELECT id, name FROM app.roles WHERE id = $1 LIMIT 1",
+    [roleId],
+  );
+  const role = roleResult.rows[0];
 
   if (!role) throw new Error("ROLE_NOT_FOUND");
 
@@ -278,9 +276,10 @@ export async function removeRoleFromUser(userId: string, roleId: string) {
     throw new Error("ROLE_PROTECTED");
   }
 
-  const result = await db
-    .delete(userRoles)
-    .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, roleId)));
+  const result = await query(
+    "DELETE FROM app.user_roles WHERE user_id = $1 AND role_id = $2",
+    [userId, roleId],
+  );
 
   if (result.rowCount === 0) {
     throw new Error("ROLE_NOT_ASSIGNED");
@@ -290,52 +289,29 @@ export async function removeRoleFromUser(userId: string, roleId: string) {
 }
 
 export async function adminDashboardStats() {
-  const [
-    totalUsers,
-    activeUsers,
-    inactiveUsers,
-    verifiedUsers,
-    recentUsers,
-    activeSessions,
-  ] = await Promise.all([
-    db.select({ count: sql<number>`count(*)` }).from(users),
+  const queries = [
+    query("SELECT COUNT(*) FROM app.users"),
+    query("SELECT COUNT(*) FROM app.users WHERE is_active = true"),
+    query("SELECT COUNT(*) FROM app.users WHERE is_active = false"),
+    query("SELECT COUNT(*) FROM app.users WHERE email_verified = true"),
+    query(
+      "SELECT COUNT(*) FROM app.users WHERE created_at > NOW() - INTERVAL '24 hours'",
+    ),
+    query("SELECT COUNT(*) FROM app.sessions WHERE revoked_at IS NULL"),
+  ];
 
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(users)
-      .where(eq(users.isActive, true)),
-
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(users)
-      .where(eq(users.isActive, false)),
-
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(users)
-      .where(eq(users.emailVerified, true)),
-
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(users)
-      .where(gt(users.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))),
-
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(sessions)
-      .where(isNull(sessions.revokedAt)),
-  ]);
+  const results = await Promise.all(queries);
 
   return {
     users: {
-      total: totalUsers[0]?.count ?? 0,
-      active: activeUsers[0]?.count ?? 0,
-      inactive: inactiveUsers[0]?.count ?? 0,
-      emailVerified: verifiedUsers[0]?.count ?? 0,
-      last24h: recentUsers[0]?.count ?? 0,
+      total: parseInt(results[0]?.rows[0].count || "0"),
+      active: parseInt(results[1]?.rows[0].count || "0"),
+      inactive: parseInt(results[2]?.rows[0].count || "0"),
+      emailVerified: parseInt(results[3]?.rows[0].count || "0"),
+      last24h: parseInt(results[4]?.rows[0].count || "0"),
     },
     sessions: {
-      active: activeSessions[0]?.count ?? 0,
+      active: parseInt(results[5]?.rows[0].count || "0"),
     },
   };
 }

@@ -16,7 +16,6 @@
     "@types/multer": "^2.0.0",
     "@types/nodemailer": "^7.0.4",
     "@types/pg": "^8.16.0",
-    "drizzle-kit": "^0.31.8",
     "ts-node": "^10.9.2"
   },
   "peerDependencies": {
@@ -30,7 +29,6 @@
     "cors": "^2.8.5",
     "date-fns-tz": "^3.2.0",
     "dotenv": "^17.2.3",
-    "drizzle-orm": "^0.45.1",
     "express": "4",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
