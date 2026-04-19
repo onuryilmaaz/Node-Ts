@@ -41,8 +41,8 @@ export async function register(req: Request, res: Response) {
     }
 
     res.status(400).json({
-      message: "Invalid request",
-      error: err?.errors ?? err?.message,
+      message: err?.message || "Invalid request",
+      error: err?.errors,
     });
   }
 }

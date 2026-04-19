@@ -6,10 +6,12 @@ export async function sendEmail({
   to,
   subject,
   html,
+  text,
 }: {
   to: string;
   subject: string;
   html: string;
+  text?: string;
 }) {
   try {
     await axios.post(
@@ -22,6 +24,7 @@ export async function sendEmail({
         to: [{ email: to }],
         subject,
         htmlContent: html,
+        ...(text && { textContent: text }),
       },
       {
         headers: {

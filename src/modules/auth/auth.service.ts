@@ -79,12 +79,16 @@ export async function registerUser(data: {
   console.log(`EMAIL OTP for ${user.email}: ${otp}`);
   const tpl = verifyEmailTemplate({ otp, minutes: 10 });
 
-  await sendEmail({
-    to: user.email,
-    subject: tpl.subject,
-    html: tpl.html,
-    text: tpl.text,
-  });
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+    });
+  } catch (emailErr: any) {
+    console.error("[REGISTER] Email gönderilemedi, ama kayıt tamamlandı:", emailErr.message);
+  }
 
   return result[0];
 }
@@ -174,7 +178,6 @@ export async function refreshSession(data: {
 
   const session = sessionResult[0];
   if (!session) throw new Error("INVALID_REFRESH");
-  if (session.userAgent !== data.userAgent) throw new Error("SESSION_MISMATCH");
 
   await db
     .update(sessions)
