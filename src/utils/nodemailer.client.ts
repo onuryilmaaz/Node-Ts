@@ -12,12 +12,12 @@ if (!host || !port || !user || !pass) {
 export const transporter = nodemailer.createTransport({
   host,
   port,
-  secure: false, // 587 = false (TLS upgrade)
+  secure: false,
   auth: {
     user,
     pass,
   },
   tls: {
-    rejectUnauthorized: false, // Render bazen TLS hatası verir, bu güvenlidir
+    rejectUnauthorized: false,
   },
 });
