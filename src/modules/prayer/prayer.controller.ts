@@ -61,7 +61,7 @@ export async function trackPrayer(req: Request, res: Response) {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    const { prayer_time } = req.body;
+    const { prayer_time, is_kaza } = req.body;
     if (!prayer_time) return res.status(400).json({ success: false, message: "prayer_time is required" });
 
     const validPrayers = ["fajr", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
@@ -85,8 +85,8 @@ export async function trackPrayer(req: Request, res: Response) {
 
     const points = 10;
     await db.execute(
-      `INSERT INTO app.prayer_logs (user_id, date, prayer_time, points_earned) VALUES ($1, $2, $3, $4)`,
-      [userId, targetDateStr, prayer_time, points]
+      `INSERT INTO app.prayer_logs (user_id, date, prayer_time, points_earned, is_kaza) VALUES ($1, $2, $3, $4, $5)`,
+      [userId, targetDateStr, prayer_time, points, !!is_kaza]
     );
 
     // Update Gamification Stats

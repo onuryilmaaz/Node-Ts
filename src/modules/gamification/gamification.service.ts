@@ -24,11 +24,12 @@ export async function getUserStats(userId: string) {
   
   const todayStr = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" })).toISOString().split("T")[0];
   const todayPrayersRes = await db.execute(
-    `SELECT prayer_time FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
+    `SELECT prayer_time, is_kaza FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
     [userId, todayStr]
   );
   
   const todayPrayers = todayPrayersRes.rows.map(r => r.prayer_time);
+  const kazaPrayers = todayPrayersRes.rows.filter(r => r.is_kaza).map(r => r.prayer_time);
 
   if (result.rows.length === 0) {
     return {
@@ -36,10 +37,11 @@ export async function getUserStats(userId: string) {
       current_streak: 0,
       highest_streak: 0,
       last_prayer_date: null,
-      today_prayers: todayPrayers
+      today_prayers: todayPrayers,
+      kaza_prayers: kazaPrayers
     };
   }
-  return { ...result.rows[0], today_prayers: todayPrayers };
+  return { ...result.rows[0], today_prayers: todayPrayers, kaza_prayers: kazaPrayers };
 }
 
 
