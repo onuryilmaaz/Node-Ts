@@ -9,6 +9,8 @@ import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/user/user.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import prayerRoutes from "./modules/prayer/prayer.routes";
+import gamificationRoutes from "./modules/gamification/gamification.routes";
+import challengeRoutes from "./modules/challenge/challenge.routes";
 import { authMiddleware } from "./middleware/auth.middleware";
 import { sendEmail } from "./services/email.service";
 
@@ -23,6 +25,8 @@ app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/admin", adminRoutes);
 app.use("/prayer", prayerRoutes);
+app.use("/gamification", gamificationRoutes);
+app.use("/challenges", challengeRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   res.json({
