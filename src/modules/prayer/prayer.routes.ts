@@ -4,6 +4,8 @@ import {
   untrackPrayer,
   getKazaList,
   addKazaPrayer,
+  batchAddKaza,
+  quickDecrementKaza,
   completeKazaPrayer,
   deleteKazaPrayer,
   getPrayerHistory,
@@ -12,17 +14,16 @@ import { authMiddleware } from "../../middleware/auth.middleware";
 
 const router = Router();
 
-// Bugünkü namaz takibi
-router.post("/track",   authMiddleware, trackPrayer);
+router.post("/track", authMiddleware, trackPrayer);
 router.delete("/track", authMiddleware, untrackPrayer);
 
-// Namaz geçmişi
-router.get("/history",  authMiddleware, getPrayerHistory);
+router.get("/history", authMiddleware, getPrayerHistory);
 
-// Kaza namaz yönetimi
-router.get("/kaza",            authMiddleware, getKazaList);
-router.post("/kaza",           authMiddleware, addKazaPrayer);
+router.get("/kaza", authMiddleware, getKazaList);
+router.post("/kaza", authMiddleware, addKazaPrayer);
+router.post("/kaza/batch", authMiddleware, batchAddKaza);
+router.post("/kaza/quick-complete", authMiddleware, quickDecrementKaza);
 router.patch("/kaza/:id/complete", authMiddleware, completeKazaPrayer);
-router.delete("/kaza/:id",     authMiddleware, deleteKazaPrayer);
+router.delete("/kaza/:id", authMiddleware, deleteKazaPrayer);
 
 export default router;

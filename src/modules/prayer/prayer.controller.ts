@@ -125,23 +125,48 @@ export async function getKazaList(req: Request, res: Response) {
        WHERE user_id = $1 AND completed_at IS NULL
        ORDER BY missed_date ASC, 
          CASE prayer_time 
-           WHEN 'fajr' THEN 1 WHEN 'sunrise' THEN 2 WHEN 'dhuhr' THEN 3 
-           WHEN 'asr' THEN 4 WHEN 'maghrib' THEN 5 WHEN 'isha' THEN 6 ELSE 7 
+           WHEN 'fajr' THEN 1 WHEN 'dhuhr' THEN 2 
+           WHEN 'asr' THEN 3 WHEN 'maghrib' THEN 4 WHEN 'isha' THEN 5 ELSE 6 
          END`,
       [userId]
     );
 
-    const completedRes = await db.execute(
-      `SELECT COUNT(*) as cnt FROM app.kaza_queue WHERE user_id = $1 AND completed_at IS NOT NULL`,
+    const statsRes = await db.execute(
+      `SELECT * FROM app.kaza_counters WHERE user_id = $1`,
       [userId]
     );
+
+    let stats = statsRes.rows[0];
+    if (!stats) {
+      const createRes = await db.execute(
+        `INSERT INTO app.kaza_counters (user_id) VALUES ($1) RETURNING *`,
+        [userId]
+      );
+      stats = createRes.rows[0];
+    }
+
+    // Velocity: Son 30 günde eritilen kaza sayısı
+    const velocityRes = await db.execute(
+      `SELECT COUNT(*) as cnt FROM app.kaza_queue 
+       WHERE user_id = $1 AND completed_at >= NOW() - INTERVAL '30 days'`,
+      [userId]
+    );
+    const completedLast30Days = Number(velocityRes.rows[0].cnt);
 
     return res.json({
       success: true,
       data: {
         pending: result.rows,
-        total_pending: result.rows.length,
-        total_completed: Number(completedRes.rows[0].cnt),
+        total_pending: (stats.fajr_count + stats.dhuhr_count + stats.asr_count + stats.maghrib_count + stats.isha_count),
+        total_completed: Number(stats.total_completed),
+        completed_last_30_days: completedLast30Days,
+        counters: {
+          fajr: stats.fajr_count,
+          dhuhr: stats.dhuhr_count,
+          asr: stats.asr_count,
+          maghrib: stats.maghrib_count,
+          isha: stats.isha_count
+        }
       }
     });
   } catch (err) {
@@ -158,7 +183,7 @@ export async function addKazaPrayer(req: Request, res: Response) {
 
     const { prayer_time, missed_date } = req.body;
 
-    const validPrayers = ["fajr", "sunrise", "dhuhr", "asr", "maghrib", "isha"];
+    const validPrayers = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
     if (!prayer_time || !validPrayers.includes(prayer_time)) {
       return res.status(400).json({ success: false, message: "Geçersiz namaz vakti" });
     }
@@ -176,13 +201,27 @@ export async function addKazaPrayer(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: "Bu kaza namazı zaten listede." });
     }
 
+    await db.execute("BEGIN");
+
     const result = await db.execute(
       `INSERT INTO app.kaza_queue (user_id, prayer_time, missed_date) VALUES ($1, $2, $3) RETURNING *`,
       [userId, prayer_time, missed_date]
     );
 
+    // Update Counter
+    const counterField = `${prayer_time}_count`;
+    await db.execute(
+      `INSERT INTO app.kaza_counters (user_id, ${counterField}) 
+       VALUES ($1, 1) 
+       ON CONFLICT (user_id) DO UPDATE SET ${counterField} = app.kaza_counters.${counterField} + 1, updated_at = NOW()`,
+      [userId]
+    );
+
+    await db.execute("COMMIT");
+
     return res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
+    await db.execute("ROLLBACK");
     console.error("Add kaza error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -197,27 +236,45 @@ export async function completeKazaPrayer(req: Request, res: Response) {
     const { id } = req.params;
 
     const existing = await db.execute(
-      `SELECT id FROM app.kaza_queue WHERE id = $1 AND user_id = $2 AND completed_at IS NULL`,
+      `SELECT id, prayer_time FROM app.kaza_queue WHERE id = $1 AND user_id = $2 AND completed_at IS NULL`,
       [id, userId]
     );
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Kaza namazı bulunamadı." });
     }
 
+    const prayer_time = existing.rows[0].prayer_time;
+
+    await db.execute("BEGIN");
+
     await db.execute(
       `UPDATE app.kaza_queue SET completed_at = NOW() WHERE id = $1`,
       [id]
     );
 
-    // Kaza için de puan ver (yarım puan = 5)
+    // Update Counter
+    const counterField = `${prayer_time}_count`;
+    await db.execute(
+      `UPDATE app.kaza_counters SET 
+       ${counterField} = GREATEST(0, ${counterField} - 1), 
+       total_completed = total_completed + 1,
+       updated_at = NOW() 
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    // Puan ver
     const points = 5;
     await db.execute(
       `UPDATE app.user_stats SET total_points = total_points + $1, updated_at = NOW() WHERE user_id = $2`,
       [points, userId]
     );
 
+    await db.execute("COMMIT");
+
     return res.json({ success: true, message: "Kaza namazı tamamlandı.", pointsEarned: points });
   } catch (err) {
+    await db.execute("ROLLBACK");
     console.error("Complete kaza error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -231,14 +288,154 @@ export async function deleteKazaPrayer(req: Request, res: Response) {
 
     const { id } = req.params;
 
+    const existing = await db.execute(
+      `SELECT id, prayer_time FROM app.kaza_queue WHERE id = $1 AND user_id = $2 AND completed_at IS NULL`,
+      [id, userId]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Kaza namazı bulunamadı." });
+    }
+
+    const prayer_time = existing.rows[0].prayer_time;
+
+    await db.execute("BEGIN");
+
     await db.execute(
       `DELETE FROM app.kaza_queue WHERE id = $1 AND user_id = $2`,
       [id, userId]
     );
 
+    // Update Counter
+    const counterField = `${prayer_time}_count`;
+    await db.execute(
+      `UPDATE app.kaza_counters SET 
+       ${counterField} = GREATEST(0, ${counterField} - 1), 
+       updated_at = NOW() 
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    await db.execute("COMMIT");
+
     return res.json({ success: true, message: "Kaza namazı silindi." });
   } catch (err) {
+    await db.execute("ROLLBACK");
     console.error("Delete kaza error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+}
+
+// ─────────────────────────────────────────────
+// PHASE 2: BATCH OPERATIONS
+// ─────────────────────────────────────────────
+export async function batchAddKaza(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const { prayers, count } = req.body; // prayers: string[], count: number
+
+    if (!prayers || !Array.isArray(prayers) || prayers.length === 0) {
+      return res.status(400).json({ success: false, message: "prayers array is required" });
+    }
+
+    const n = Number(count) || 1;
+    const validPrayers = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+
+    await db.execute("BEGIN");
+
+    for (const prayer of prayers) {
+      if (!validPrayers.includes(prayer)) continue;
+
+      // Toplu eklemede tarih olarak bugünü kullanıyoruz (ya da null)
+      // Ancak detaylı log yerine toplu eklemede genellikle "X adet borcum var" mantığı olduğu için
+      // Burada X tane satır eklemek yerine counter'ı artırabiliriz.
+      // AMA kullanıcının istediği "X adet satır ekle" ise:
+      for (let i = 0; i < n; i++) {
+        await db.execute(
+          `INSERT INTO app.kaza_queue (user_id, prayer_time, missed_date) VALUES ($1, $2, NOW())`,
+          [userId, prayer]
+        );
+      }
+
+      const counterField = `${prayer}_count`;
+      await db.execute(
+        `INSERT INTO app.kaza_counters (user_id, ${counterField}) 
+         VALUES ($1, $2) 
+         ON CONFLICT (user_id) DO UPDATE SET ${counterField} = app.kaza_counters.${counterField} + $2, updated_at = NOW()`,
+        [userId, n]
+      );
+    }
+
+    await db.execute("COMMIT");
+
+    return res.json({ success: true, message: "Toplu kaza ekleme başarılı." });
+  } catch (err) {
+    await db.execute("ROLLBACK");
+    console.error("Batch add kaza error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+}
+
+export async function quickDecrementKaza(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const { prayer_time } = req.body;
+    const validPrayers = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+
+    if (!validPrayers.includes(prayer_time)) {
+      return res.status(400).json({ success: false, message: "Geçersiz namaz vakti" });
+    }
+
+    await db.execute("BEGIN");
+
+    // En eski bekleyen kazayı bul ve tamamla
+    const oldest = await db.execute(
+      `SELECT id FROM app.kaza_queue 
+       WHERE user_id = $1 AND prayer_time = $2 AND completed_at IS NULL 
+       ORDER BY missed_date ASC, created_at ASC LIMIT 1`,
+      [userId, prayer_time]
+    );
+
+    if (oldest.rows.length === 0) {
+      // Sync fix: If no rows exist but counter is high, reset it
+      const counterField = `${prayer_time}_count`;
+      await db.execute(
+        `UPDATE app.kaza_counters SET ${counterField} = 0 WHERE user_id = $1`,
+        [userId]
+      );
+      return res.status(404).json({ success: false, message: "Bekleyen kaza bulunamadı. Sayaç senkronize edildi." });
+    }
+
+    const id = oldest.rows[0].id;
+    await db.execute(`UPDATE app.kaza_queue SET completed_at = NOW() WHERE id = $1`, [id]);
+
+    const counterField = `${prayer_time}_count`;
+    await db.execute(
+      `UPDATE app.kaza_counters SET 
+       ${counterField} = GREATEST(0, ${counterField} - 1), 
+       total_completed = total_completed + 1,
+       updated_at = NOW() 
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const points = 5;
+    await db.execute(
+      `UPDATE app.user_stats SET total_points = total_points + $1, updated_at = NOW() WHERE user_id = $2`,
+      [points, userId]
+    );
+
+    await db.execute("COMMIT");
+
+    return res.json({ success: true, pointsEarned: points });
+  } catch (err) {
+    await db.execute("ROLLBACK");
+    console.error("Quick decrement error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 }
