@@ -24,13 +24,22 @@ export async function registerUser(data: {
 
   const passwordHash = await hashPassword(data.password);
 
+  const username = data.email.split("@")[0];
+
   const result = await query(
     `
-    INSERT INTO app.users (email, first_name, last_name, password_hash, auth_provider) 
-    VALUES ($1, $2, $3, $4, $5) 
-    RETURNING id, email, first_name AS "firstName", last_name AS "lastName", email_verified AS "emailVerified"
+    INSERT INTO app.users (email, username, first_name, last_name, password_hash, auth_provider) 
+    VALUES ($1, $2, $3, $4, $5, $6) 
+    RETURNING id, email, username, first_name AS "firstName", last_name AS "lastName", email_verified AS "emailVerified"
     `,
-    [data.email, data.firstName, data.lastName, passwordHash, "local"],
+    [
+      data.email,
+      username,
+      data.firstName,
+      data.lastName,
+      passwordHash,
+      "local",
+    ],
   );
 
   const user = result.rows[0];
@@ -89,8 +98,8 @@ export async function loginUser(data: {
   userAgent: string | null;
 }) {
   const result = await query(
-    `SELECT id, email, password_hash as "passwordHash", is_active as "isActive", email_verified as "emailVerified" 
-     FROM app.users WHERE email = $1 LIMIT 1`,
+    `SELECT id, email, username, password_hash as "passwordHash", is_active as "isActive", email_verified as "emailVerified" 
+     FROM app.users WHERE email = $1 OR username = $1 LIMIT 1`,
     [data.email],
   );
 
@@ -136,6 +145,7 @@ export async function loginUser(data: {
     user: {
       id: user.id,
       email: user.email,
+      username: user.username,
       emailVerified: user.emailVerified ?? false,
       roles: rolesNames,
     },

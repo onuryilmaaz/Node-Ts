@@ -10,6 +10,7 @@ export async function getUserProfile(userId: string) {
     SELECT
       id,
       email,
+      username,
       email_verified AS "emailVerified",
       first_name AS "firstName",
       last_name AS "lastName",
@@ -92,6 +93,7 @@ export async function updateUserProfile(
     firstName: "first_name",
     lastName: "last_name",
     phone: "phone",
+    username: "username",
   };
 
   const setClauses: string[] = [];
