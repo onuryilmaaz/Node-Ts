@@ -127,7 +127,8 @@ export async function getKazaList(req: Request, res: Response) {
          CASE prayer_time 
            WHEN 'fajr' THEN 1 WHEN 'dhuhr' THEN 2 
            WHEN 'asr' THEN 3 WHEN 'maghrib' THEN 4 WHEN 'isha' THEN 5 ELSE 6 
-         END`,
+         END
+       LIMIT 50`,
       [userId]
     );
 
@@ -331,40 +332,20 @@ export async function deleteKazaPrayer(req: Request, res: Response) {
 export async function batchAddKaza(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId)
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    const { prayers, count } = req.body;
 
-    const { prayers, count } = req.body; // prayers: string[], count: number
-
-    if (!prayers || !Array.isArray(prayers) || prayers.length === 0) {
-      return res.status(400).json({ success: false, message: "prayers array is required" });
-    }
-
-    const n = Number(count) || 1;
-    const validPrayers = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+    if (!userId || !prayers || !count) return res.status(400).json({ success: false, message: "Geçersiz veri" });
 
     await db.execute("BEGIN");
 
+    // SADECE SAYAÇLARI GÜNCELLE (Binlerce satır eklemeye gerek yok)
     for (const prayer of prayers) {
-      if (!validPrayers.includes(prayer)) continue;
-
-      // Toplu eklemede tarih olarak bugünü kullanıyoruz (ya da null)
-      // Ancak detaylı log yerine toplu eklemede genellikle "X adet borcum var" mantığı olduğu için
-      // Burada X tane satır eklemek yerine counter'ı artırabiliriz.
-      // AMA kullanıcının istediği "X adet satır ekle" ise:
-      for (let i = 0; i < n; i++) {
-        await db.execute(
-          `INSERT INTO app.kaza_queue (user_id, prayer_time, missed_date) VALUES ($1, $2, NOW())`,
-          [userId, prayer]
-        );
-      }
-
       const counterField = `${prayer}_count`;
       await db.execute(
         `INSERT INTO app.kaza_counters (user_id, ${counterField}) 
          VALUES ($1, $2) 
          ON CONFLICT (user_id) DO UPDATE SET ${counterField} = app.kaza_counters.${counterField} + $2, updated_at = NOW()`,
-        [userId, n]
+        [userId, count]
       );
     }
 
@@ -402,13 +383,37 @@ export async function quickDecrementKaza(req: Request, res: Response) {
     );
 
     if (oldest.rows.length === 0) {
-      // Sync fix: If no rows exist but counter is high, reset it
+      // SIRA KAYDI YOKSA: Direkt sayaçtan düş (Virtual Kaza)
       const counterField = `${prayer_time}_count`;
+      
+      // Sayacı kontrol et
+      const checkRes = await db.execute(`SELECT ${counterField} FROM app.kaza_counters WHERE user_id = $1`, [userId]);
+      const currentCount = checkRes.rows[0]?.[counterField] || 0;
+
+      if (currentCount <= 0) {
+        return res.status(404).json({ success: false, message: "Bekleyen kaza bulunamadı." });
+      }
+
+      await db.execute("BEGIN");
+      // Sayacı düş ve toplam tamamlananı artır
       await db.execute(
-        `UPDATE app.kaza_counters SET ${counterField} = 0 WHERE user_id = $1`,
+        `UPDATE app.kaza_counters 
+         SET ${counterField} = GREATEST(0, ${counterField} - 1), 
+             total_completed = total_completed + 1,
+             updated_at = NOW() 
+         WHERE user_id = $1`,
         [userId]
       );
-      return res.status(404).json({ success: false, message: "Bekleyen kaza bulunamadı. Sayaç senkronize edildi." });
+      
+      // Log için hayali bir kayıt ekle (Opsiyonel: İstersen log tutabilirsin)
+      await db.execute(
+        `INSERT INTO app.kaza_queue (user_id, prayer_time, missed_date, completed_at) 
+         VALUES ($1, $2, NOW(), NOW())`,
+        [userId, prayer_time]
+      );
+
+      await db.execute("COMMIT");
+      return res.json({ success: true, points: 5 });
     }
 
     const id = oldest.rows[0].id;
