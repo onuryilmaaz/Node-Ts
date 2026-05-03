@@ -13,7 +13,8 @@ import {
 export async function getStats(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const stats = await getUserStats(userId);
     const badges = await getUserBadges(userId);
@@ -25,7 +26,7 @@ export async function getStats(req: Request, res: Response) {
         badges,
         allBadges: BADGE_DETAILS,
         levels: LEVELS,
-      }
+      },
     });
   } catch (err) {
     console.error("Error fetching stats:", err);
@@ -47,7 +48,8 @@ export async function getLeaderboardTop(req: Request, res: Response) {
 export async function getStatsWeekly(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const data = await getWeeklyStats(userId);
     return res.json({ success: true, data });
@@ -60,7 +62,8 @@ export async function getStatsWeekly(req: Request, res: Response) {
 export async function getStatsMonthly(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const data = await getMonthlyStats(userId);
     return res.json({ success: true, data });
@@ -73,11 +76,15 @@ export async function getStatsMonthly(req: Request, res: Response) {
 export async function getLevelInfo(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const stats = await getUserStats(userId);
     const level = calculateLevel(Number(stats.total_points));
-    return res.json({ success: true, data: { level, total_points: stats.total_points } });
+    return res.json({
+      success: true,
+      data: { level, total_points: stats.total_points },
+    });
   } catch (err) {
     console.error("Error fetching level:", err);
     return res.status(500).json({ success: false, message: "Server error" });

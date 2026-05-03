@@ -8,7 +8,8 @@ import {
 export async function listChallenges(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const challenges = await getActiveChallenges(userId);
     return res.json({ success: true, data: challenges });
@@ -21,15 +22,21 @@ export async function listChallenges(req: Request, res: Response) {
 export async function join(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const { id } = req.params;
-    if (!id) return res.status(400).json({ success: false, message: "Challenge ID gerekli." });
+    if (!id)
+      return res
+        .status(400)
+        .json({ success: false, message: "Challenge ID gerekli." });
 
     const result = await joinChallenge(userId, id);
 
     if (result.alreadyJoined) {
-      return res.status(400).json({ success: false, message: "Bu challenge'a zaten katıldınız." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Bu challenge'a zaten katıldınız." });
     }
 
     return res.status(201).json({ success: true, data: result.row });
@@ -42,7 +49,8 @@ export async function join(req: Request, res: Response) {
 export async function history(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const data = await getUserChallengeHistory(userId);
     return res.json({ success: true, data });

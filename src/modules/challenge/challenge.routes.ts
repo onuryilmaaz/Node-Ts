@@ -4,8 +4,8 @@ import { authMiddleware } from "../../middleware/auth.middleware";
 
 const router = Router();
 
-router.get("/",            authMiddleware, listChallenges);
-router.post("/:id/join",   authMiddleware, join);
-router.get("/history",     authMiddleware, history);
+router.get("/", authMiddleware, listChallenges);
+router.post("/:id/join", authMiddleware, join);
+router.get("/history", authMiddleware, history);
 
 export default router;

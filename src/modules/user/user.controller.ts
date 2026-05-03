@@ -7,7 +7,6 @@ import {
   uploadAvatarService,
 } from "./user.service";
 import { changePasswordSchema, updateProfileSchema } from "./user.schema";
-import { buildFileUrl } from "../../services/file.service";
 
 export async function getProfile(req: Request, res: Response) {
   try {

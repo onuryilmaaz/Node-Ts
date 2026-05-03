@@ -169,9 +169,10 @@ export async function getAllRoles() {
 }
 
 export async function createRole(name: string) {
-  const existing = await query("SELECT id FROM app.roles WHERE name = $1 LIMIT 1", [
-    name,
-  ]);
+  const existing = await query(
+    "SELECT id FROM app.roles WHERE name = $1 LIMIT 1",
+    [name],
+  );
 
   if (existing.rowCount && existing.rowCount > 0)
     throw new Error("ROLE_EXISTS");
@@ -240,9 +241,10 @@ export async function assignRoleToUser(userId: string, roleId: string) {
   if (!user) throw new Error("USER_NOT_FOUND");
   if (!user.isActive) throw new Error("USER_INACTIVE");
 
-  const roleResult = await query("SELECT id FROM app.roles WHERE id = $1 LIMIT 1", [
-    roleId,
-  ]);
+  const roleResult = await query(
+    "SELECT id FROM app.roles WHERE id = $1 LIMIT 1",
+    [roleId],
+  );
   const role = roleResult.rows[0];
 
   if (!role) throw new Error("ROLE_NOT_FOUND");

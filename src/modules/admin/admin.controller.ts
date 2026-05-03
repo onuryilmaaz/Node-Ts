@@ -258,7 +258,7 @@ export async function assignRoleToUserController(req: Request, res: Response) {
 
 export async function removeRoleFromUserController(
   req: Request,
-  res: Response
+  res: Response,
 ) {
   try {
     const { userId, roleId } = req.params;

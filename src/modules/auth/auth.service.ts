@@ -215,7 +215,7 @@ export async function logoutUser(refreshToken: string) {
   );
 }
 
-async function getUserRoles(userId: string): Promise<string[]> {
+export async function getUserRoles(userId: string): Promise<string[]> {
   const rows = await query(
     "SELECT r.name FROM app.user_roles ur INNER JOIN app.roles r ON ur.role_id = r.id WHERE ur.user_id = $1",
     [userId],
