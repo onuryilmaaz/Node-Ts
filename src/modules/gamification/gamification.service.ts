@@ -402,6 +402,17 @@ export async function checkAndAwardBadges(userId: string, stats: any) {
   const perfectDays = Number(perfectWeekCheck.rows[0]?.cnt || 0);
   await checkBadge(perfectDays >= 7, BADGES.WEEK_PERFECT);
 
+  const perfectMonthCheck = await db.execute(
+    `SELECT COUNT(*) as cnt FROM (
+       SELECT date FROM app.prayer_logs
+       WHERE user_id = $1 AND date >= NOW() - INTERVAL '30 days'
+       GROUP BY date HAVING COUNT(*) >= 5
+     ) sub`,
+    [userId],
+  );
+  const perfectMonthDays = Number(perfectMonthCheck.rows[0]?.cnt || 0);
+  await checkBadge(perfectMonthDays >= 30, BADGES.MONTH_PERFECT);
+
   return newBadges;
 }
 
@@ -410,7 +421,11 @@ export async function updateStatsForPrayer(
   targetDate: Date,
   points: number,
 ) {
-  const targetDateStr = targetDate.toISOString().split("T")[0];
+  const targetDateStr = new Date(
+    targetDate.toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
+  )
+    .toISOString()
+    .split("T")[0];
 
   const todayPrayersRes = await db.execute(
     `SELECT count(*) FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
