@@ -1,5 +1,56 @@
 import { db } from "../../db";
 
+function turkeyDateStr(d?: Date): string {
+  return (d ?? new Date()).toLocaleDateString("en-CA", {
+    timeZone: "Europe/Istanbul",
+  });
+}
+
+function safeLastDate(val: any): string | null {
+  if (!val) return null;
+  if (typeof val === "string") return val.substring(0, 10);
+  return (val as Date).toLocaleDateString("en-CA", {
+    timeZone: "Europe/Istanbul",
+  });
+}
+
+function prevDay(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00+03:00");
+  d.setDate(d.getDate() - 1);
+  return turkeyDateStr(d);
+}
+
+async function calculateStreakFromLogs(
+  userId: string,
+): Promise<{ streak: number; lastDate: string | null }> {
+  const res = await db.execute(
+    `SELECT date::text AS d FROM app.prayer_logs
+     WHERE user_id = $1
+     GROUP BY date HAVING COUNT(*) >= 5
+     ORDER BY date DESC LIMIT 100`,
+    [userId],
+  );
+  if (res.rows.length === 0) return { streak: 0, lastDate: null };
+
+  const completed = new Set(res.rows.map((r: any) => r.d.substring(0, 10)));
+  const todayStr = turkeyDateStr();
+
+  let current = completed.has(todayStr) ? todayStr : prevDay(todayStr);
+  let streak = 0;
+  let lastDate: string | null = null;
+
+  for (let i = 0; i < 100; i++) {
+    if (completed.has(current)) {
+      if (!lastDate) lastDate = current;
+      streak++;
+      current = prevDay(current);
+    } else {
+      break;
+    }
+  }
+  return { streak, lastDate };
+}
+
 export const BADGES = {
   // İlk adımlar
   FIRST_PRAYER: "ilk_adim",
@@ -274,11 +325,7 @@ export async function getUserStats(userId: string) {
     [userId],
   );
 
-  const todayStr = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
-  )
-    .toISOString()
-    .split("T")[0];
+  const todayStr = turkeyDateStr();
   const todayPrayersRes = await db.execute(
     `SELECT prayer_time, is_kaza FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
     [userId, todayStr],
@@ -298,6 +345,25 @@ export async function getUserStats(userId: string) {
           last_prayer_date: null,
         }
       : result.rows[0];
+
+  // Self-heal: if streak is 0 but user has completed prayer days, recalculate
+  if (Number(baseStats.current_streak) === 0 && result.rows.length > 0) {
+    const { streak: correct, lastDate } = await calculateStreakFromLogs(userId);
+    if (correct > 0) {
+      await db.execute(
+        `UPDATE app.user_stats
+         SET current_streak = $1, highest_streak = GREATEST(highest_streak, $1),
+             last_prayer_date = COALESCE($3, last_prayer_date)
+         WHERE user_id = $2`,
+        [correct, userId, lastDate],
+      );
+      baseStats.current_streak = correct;
+      if (correct > Number(baseStats.highest_streak)) {
+        baseStats.highest_streak = correct;
+      }
+      if (lastDate) baseStats.last_prayer_date = lastDate;
+    }
+  }
 
   const level = calculateLevel(Number(baseStats.total_points));
 
@@ -418,11 +484,9 @@ export async function checkAndAwardBadges(userId: string, stats: any) {
 
 export async function updateStatsForPrayer(
   userId: string,
-  targetDate: Date,
+  targetDateStr: string,
   points: number,
 ) {
-  const targetDateStr = targetDate.toISOString().split("T")[0];
-
   const todayPrayersRes = await db.execute(
     `SELECT count(*) FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
     [userId, targetDateStr],
@@ -435,11 +499,11 @@ export async function updateStatsForPrayer(
   );
 
   if (statsRes.rows.length === 0) {
-    const streak = todayCount === 5 ? 1 : 0;
-    const lastDate = todayCount === 5 ? targetDateStr : null;
+    const streak = todayCount >= 5 ? 1 : 0;
+    const lastDate = todayCount >= 5 ? targetDateStr : null;
 
     const insertRes = await db.execute(
-      `INSERT INTO app.user_stats (user_id, total_points, current_streak, highest_streak, last_prayer_date) 
+      `INSERT INTO app.user_stats (user_id, total_points, current_streak, highest_streak, last_prayer_date)
        VALUES ($1, $2, $3, $3, $4) RETURNING *`,
       [userId, points, streak, lastDate],
     );
@@ -452,46 +516,32 @@ export async function updateStatsForPrayer(
     return {
       stats: { ...newStats, today_prayers_count: todayCount, level },
       newBadges: badges,
+      streakIncremented: streak === 1,
     };
   }
 
   const stats = statsRes.rows[0];
-  let newStreak = stats.current_streak;
-  let newTotalPoints = stats.total_points + points;
+  const prevStreak = Number(stats.current_streak);
+  const newTotalPoints = Number(stats.total_points) + points;
+  let newStreak = prevStreak;
   let newLastDate = stats.last_prayer_date;
-  let lastCompletedDateStr = stats.last_prayer_date
-    ? new Date(stats.last_prayer_date).toISOString().split("T")[0]
-    : null;
+  let streakIncremented = false;
 
-  if (todayCount === 5) {
-    if (lastCompletedDateStr !== targetDateStr) {
-      if (lastCompletedDateStr) {
-        const yesterday = new Date(targetDate);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split("T")[0];
-
-        if (lastCompletedDateStr === yesterdayStr) {
-          newStreak += 1;
-        } else {
-          newStreak = 1;
-        }
-      } else {
-        newStreak = 1;
-      }
-      newLastDate = targetDateStr;
-    }
+  if (todayCount >= 5) {
+    // Unconditional recalculate — no stale-date gates, always read truth from logs
+    const { streak: correct, lastDate: correctLastDate } = await calculateStreakFromLogs(userId);
+    newStreak = correct;
+    newLastDate = correctLastDate ?? targetDateStr;
+    streakIncremented = correct > prevStreak;
   } else {
-    if (lastCompletedDateStr) {
-      const yesterday = new Date(targetDate);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split("T")[0];
-
-      if (
-        lastCompletedDateStr !== targetDateStr &&
-        lastCompletedDateStr !== yesterdayStr
-      ) {
-        newStreak = 0;
-      }
+    const lastCompletedDateStr = safeLastDate(stats.last_prayer_date);
+    const yesterdayStr = prevDay(targetDateStr);
+    if (
+      lastCompletedDateStr &&
+      lastCompletedDateStr !== targetDateStr &&
+      lastCompletedDateStr !== yesterdayStr
+    ) {
+      newStreak = 0;
     }
   }
 
@@ -513,6 +563,7 @@ export async function updateStatsForPrayer(
   return {
     stats: { ...newStats, today_prayers_count: todayCount, level },
     newBadges: badges,
+    streakIncremented,
   };
 }
 

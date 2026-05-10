@@ -20,10 +20,9 @@ export async function trackPrayer(req: Request, res: Response) {
         .json({ success: false, message: "Geçersiz namaz vakti" });
     }
 
-    const nowTR = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
-    );
-    const targetDateStr = nowTR.toISOString().split("T")[0];
+    const targetDateStr = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Europe/Istanbul",
+    });
 
     const existing = await db.execute(
       `SELECT id FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
@@ -44,9 +43,9 @@ export async function trackPrayer(req: Request, res: Response) {
 
     const { updateStatsForPrayer } =
       await import("../gamification/gamification.service.js");
-    const { stats, newBadges } = await updateStatsForPrayer(
+    const { stats, newBadges, streakIncremented } = await updateStatsForPrayer(
       userId,
-      nowTR,
+      targetDateStr,
       points,
     );
 
@@ -62,6 +61,7 @@ export async function trackPrayer(req: Request, res: Response) {
         stats,
         newBadges,
         completedChallenges,
+        streakIncremented,
       },
     });
   } catch (err) {
