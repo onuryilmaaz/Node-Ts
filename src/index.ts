@@ -12,6 +12,7 @@ import prayerRoutes from "./modules/prayer/prayer.routes";
 import gamificationRoutes from "./modules/gamification/gamification.routes";
 import challengeRoutes from "./modules/challenge/challenge.routes";
 import mosqueRoutes from "./modules/mosque/mosque.routes";
+import trackerRoutes from "./modules/tracker/tracker.routes";
 import { authMiddleware } from "./middleware/auth.middleware";
 import { sendEmail } from "./services/email.service";
 
@@ -29,6 +30,7 @@ app.use("/prayer", prayerRoutes);
 app.use("/gamification", gamificationRoutes);
 app.use("/challenges", challengeRoutes);
 app.use("/mosques", mosqueRoutes);
+app.use("/tracker", trackerRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   res.json({

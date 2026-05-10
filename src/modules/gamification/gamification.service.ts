@@ -421,11 +421,7 @@ export async function updateStatsForPrayer(
   targetDate: Date,
   points: number,
 ) {
-  const targetDateStr = new Date(
-    targetDate.toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
-  )
-    .toISOString()
-    .split("T")[0];
+  const targetDateStr = targetDate.toISOString().split("T")[0];
 
   const todayPrayersRes = await db.execute(
     `SELECT count(*) FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
