@@ -1,10 +1,25 @@
 import { db } from "../../db";
+import { addPointsForActivity } from "../gamification/gamification.service";
+
+function calculatePoints(type: string, value: Record<string, unknown>): number {
+  switch (type) {
+    case "quran": return Math.ceil((Number(value.pages) || 0) * 2);
+    case "dhikr": return Math.max(1, Math.ceil((Number(value.count) || 0) / 33));
+    case "nafile": return Math.ceil((Number(value.rakaat) || 0) * 2);
+    case "fasting": return 30;
+    case "sadaka": return 10;
+    case "dua": return Math.max(1, Math.ceil((Number(value.minutes) || 0) / 15) * 3);
+    case "memorization":
+      return (Number(value.new_ayets) || 0) * 10 + (Number(value.revision_ayets) || 0) * 3;
+    default: return 5;
+  }
+}
 
 function getTurkishDateStr(): string {
   const nowTR = new Date(
     new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
   );
-  return nowTR.toISOString().split("T")[0];
+  return nowTR.toISOString().split("T")[0]!;
 }
 
 export async function logActivity(
@@ -22,6 +37,8 @@ export async function logActivity(
      RETURNING *`,
     [userId, targetDate, activityType, JSON.stringify(value), notes ?? null],
   );
+  const points = calculatePoints(activityType, value);
+  addPointsForActivity(userId, points).catch(() => {});
   return result.rows[0];
 }
 
@@ -106,7 +123,7 @@ export async function getWeeklyStats(userId: string) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split("T")[0];
-    days.push({ date: dateStr, activities: dailyMap[dateStr] ?? {} });
+    days.push({ date: dateStr, activities: dailyMap[dateStr!] ?? {} });
   }
 
   // Compute per-type weekly totals

@@ -45,7 +45,7 @@ export async function updateLogHandler(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: "value alanı gereklidir" });
     }
 
-    const log = await updateLog(userId, id, value, notes);
+    const log = await updateLog(userId, id!, value, notes);
     if (!log) return res.status(404).json({ success: false, message: "Kayıt bulunamadı" });
 
     return res.json({ success: true, data: log });
@@ -61,7 +61,7 @@ export async function deleteLogHandler(req: Request, res: Response) {
     if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const { id } = req.params;
-    await deleteLog(userId, id);
+    await deleteLog(userId, id!);
     return res.json({ success: true });
   } catch (err) {
     console.error("Delete log error:", err);
@@ -88,11 +88,11 @@ export async function getDateLogsHandler(req: Request, res: Response) {
     if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const { date } = req.params;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ success: false, message: "Geçersiz tarih formatı (YYYY-MM-DD)" });
     }
 
-    const logs = await getLogsForDate(userId, date);
+    const logs = await getLogsForDate(userId, date!);
     return res.json({ success: true, data: logs });
   } catch (err) {
     console.error("Get date logs error:", err);

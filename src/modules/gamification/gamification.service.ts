@@ -556,6 +556,28 @@ export async function getWeeklyStats(userId: string) {
   };
 }
 
+export async function addPointsForActivity(userId: string, points: number): Promise<void> {
+  if (points <= 0) return;
+  await db.execute(
+    `INSERT INTO app.user_stats (user_id, total_points, current_streak, highest_streak)
+     VALUES ($1, $2, 0, 0)
+     ON CONFLICT (user_id) DO UPDATE
+     SET total_points = app.user_stats.total_points + $2, updated_at = NOW()`,
+    [userId, points],
+  );
+  const statsRes = await db.execute(
+    `SELECT total_points FROM app.user_stats WHERE user_id = $1`,
+    [userId],
+  );
+  if (statsRes.rows.length > 0) {
+    await checkAndAwardBadges(userId, {
+      ...statsRes.rows[0],
+      today_prayers_count: 0,
+      current_streak: 0,
+    }).catch(() => {});
+  }
+}
+
 export async function getMonthlyStats(userId: string) {
   const result = await db.execute(
     `SELECT 
