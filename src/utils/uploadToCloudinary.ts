@@ -1,25 +1,20 @@
 import cloudinary from "./cloudinary";
 
-export function uploadToCloudinary(
+export async function uploadToCloudinary(
   buffer: Buffer,
   folder: string
 ): Promise<{ url: string; publicId: string }> {
-  return new Promise((resolve, reject) => {
-    cloudinary.uploader
-      .upload_stream(
-        {
-          folder,
-          resource_type: "image",
-        },
-        (error, result) => {
-          if (error || !result) return reject(error);
+  const base64 = buffer.toString("base64");
+  const dataUri = `data:image/jpeg;base64,${base64}`;
 
-          resolve({
-            url: result.secure_url,
-            publicId: result.public_id,
-          });
-        }
-      )
-      .end(buffer);
+  const result = await cloudinary.uploader.upload(dataUri, {
+    folder,
+    resource_type: "image",
+    transformation: [{ width: 1200, crop: "limit", quality: "auto:good" }],
   });
+
+  return {
+    url: result.secure_url,
+    publicId: result.public_id,
+  };
 }

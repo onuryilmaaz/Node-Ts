@@ -15,8 +15,14 @@ import mosqueRoutes from "./modules/mosque/mosque.routes";
 import trackerRoutes from "./modules/tracker/tracker.routes";
 import { authMiddleware } from "./middleware/auth.middleware";
 import { sendEmail } from "./services/email.service";
+import { query } from "./db";
 
 const app = express();
+
+// Migration: add image_public_id column if not exists
+query(
+  "ALTER TABLE app.mosques ADD COLUMN IF NOT EXISTS image_public_id TEXT"
+).catch((e) => console.error("Migration error:", e));
 
 app.use(helmet());
 app.use(cors());
