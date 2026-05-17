@@ -6,6 +6,24 @@ function turkeyDateStr(d?: Date): string {
   });
 }
 
+// Gece yarısı ile İmsak arası (yaklaşık 04:00'a kadar) hâlâ bir önceki İslami gün sayılır.
+// Bu nedenle İstanbul saatiyle 04:00'dan önce ise bir önceki takvim gününü döndürür.
+export function islamicDateStr(): string {
+  const now = new Date();
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Istanbul",
+      hour: "2-digit",
+      hour12: false,
+    }).format(now),
+  );
+  if (hour < 4) {
+    // 04:00'dan önce → bir önceki İslami güne ait
+    return turkeyDateStr(new Date(now.getTime() - 5 * 60 * 60 * 1000));
+  }
+  return turkeyDateStr(now);
+}
+
 function safeLastDate(val: any): string | null {
   if (!val) return null;
   if (typeof val === "string") return val.substring(0, 10);
@@ -33,7 +51,7 @@ async function calculateStreakFromLogs(
   if (res.rows.length === 0) return { streak: 0, lastDate: null };
 
   const completed = new Set(res.rows.map((r: any) => r.d.substring(0, 10)));
-  const todayStr = turkeyDateStr();
+  const todayStr = islamicDateStr();
 
   let current = completed.has(todayStr) ? todayStr : prevDay(todayStr);
   let streak = 0;
@@ -325,7 +343,7 @@ export async function getUserStats(userId: string) {
     [userId],
   );
 
-  const todayStr = turkeyDateStr();
+  const todayStr = islamicDateStr();
   const todayPrayersRes = await db.execute(
     `SELECT prayer_time, is_kaza FROM app.prayer_logs WHERE user_id = $1 AND date = $2`,
     [userId, todayStr],

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { db } from "../../db";
+import { islamicDateStr } from "../gamification/gamification.service.js";
 
 export async function trackPrayer(req: Request, res: Response) {
   try {
@@ -20,9 +21,7 @@ export async function trackPrayer(req: Request, res: Response) {
         .json({ success: false, message: "Geçersiz namaz vakti" });
     }
 
-    const targetDateStr = new Date().toLocaleDateString("en-CA", {
-      timeZone: "Europe/Istanbul",
-    });
+    const targetDateStr = islamicDateStr();
 
     const existing = await db.execute(
       `SELECT id FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
@@ -82,10 +81,7 @@ export async function untrackPrayer(req: Request, res: Response) {
         .status(400)
         .json({ success: false, message: "prayer_time is required" });
 
-    const nowTR = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }),
-    );
-    const todayStr = nowTR.toISOString().split("T")[0];
+    const todayStr = islamicDateStr();
 
     const existing = await db.execute(
       `SELECT id, points_earned FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
