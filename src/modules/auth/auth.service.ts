@@ -7,6 +7,7 @@ import { verifyEmailTemplate } from "../../templates/verify-email.template";
 import { sendEmail } from "../../services/email.service";
 import { resetPasswordTemplate } from "../../templates/reset-password.template";
 import { changeEmailTemplate } from "../../templates/change-email.template";
+import { verifyClerkToken } from "../../services/clerk.service";
 
 export async function registerUser(data: {
   email: string;
@@ -503,3 +504,127 @@ export async function cleanupExpiredSessions() {
     "UPDATE app.sessions SET revoked_at = NOW() WHERE expires_at < NOW() AND revoked_at IS NULL",
   );
 }
+
+export async function loginOrRegisterWithClerk(data: {
+  token: string;
+  userAgent: string | null;
+}) {
+  const clerkUser = await verifyClerkToken(data.token);
+
+  // Check if user already exists in db by email
+  const existingResult = await query(
+    `SELECT id, email, username, is_active as "isActive", email_verified as "emailVerified", auth_provider as "authProvider", provider_id as "providerId"
+     FROM app.users WHERE email = $1 LIMIT 1`,
+    [clerkUser.email]
+  );
+
+  let userId: string;
+  let userEmail: string;
+  let userUsername: string;
+  let emailVerified: boolean;
+
+  if (existingResult.rowCount && existingResult.rowCount > 0) {
+    const dbUser = existingResult.rows[0];
+    if (!dbUser.isActive) {
+      throw new Error("ACCOUNT_DEACTIVATED");
+    }
+
+    userId = dbUser.id;
+    userEmail = dbUser.email;
+    userUsername = dbUser.username;
+    emailVerified = true; // Email verified via Clerk
+
+    // Update existing user to link Clerk
+    await query(
+      `UPDATE app.users 
+       SET auth_provider = $1, provider_id = $2, email_verified = true, 
+           first_name = COALESCE(first_name, $3), last_name = COALESCE(last_name, $4),
+           avatar_url = COALESCE(avatar_url, $5), updated_at = NOW() 
+       WHERE id = $6`,
+      ["clerk", clerkUser.clerkUserId, clerkUser.firstName, clerkUser.lastName, clerkUser.avatarUrl, userId]
+    );
+  } else {
+    // Register a new user with clerk provider
+    let baseUsername = clerkUser.email.split("@")[0];
+    baseUsername = baseUsername.replace(/[^a-zA-Z0-9_]/g, "");
+    if (baseUsername.length < 3) baseUsername = "user_" + baseUsername;
+    
+    let username = baseUsername;
+    let isUsernameTaken = true;
+    let attempt = 0;
+    while (isUsernameTaken && attempt < 10) {
+      const usernameCheck = await query("SELECT id FROM app.users WHERE username = $1 LIMIT 1", [username]);
+      if (usernameCheck.rowCount === 0) {
+        isUsernameTaken = false;
+      } else {
+        attempt++;
+        username = `${baseUsername}_${Math.floor(Math.random() * 1000)}`;
+      }
+    }
+
+    const insertResult = await query(
+      `INSERT INTO app.users (email, username, first_name, last_name, avatar_url, auth_provider, provider_id, email_verified)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, email, username, email_verified AS "emailVerified"`,
+      [
+        clerkUser.email,
+        username,
+        clerkUser.firstName,
+        clerkUser.lastName,
+        clerkUser.avatarUrl,
+        "clerk",
+        clerkUser.clerkUserId,
+        true
+      ]
+    );
+
+    const newUser = insertResult.rows[0];
+    if (!newUser) throw new Error("USER_CREATE_FAILED");
+
+    userId = newUser.id;
+    userEmail = newUser.email;
+    userUsername = newUser.username;
+    emailVerified = true;
+
+    // Add default user role
+    const roleResult = await query("SELECT id FROM app.roles WHERE name = $1 LIMIT 1", ["user"]);
+    const role = roleResult.rows[0];
+    if (!role) throw new Error("DEFAULT_ROLE_NOT_FOUND");
+
+    await query("INSERT INTO app.user_roles (user_id, role_id) VALUES ($1, $2)", [userId, role.id]);
+  }
+
+  // Get user roles
+  const roles = await getUserRoles(userId);
+
+  // Generate tokens
+  const accessToken = signAccessToken({
+    userId,
+    email: userEmail,
+    roles,
+    emailVerified,
+    isActive: true,
+  });
+
+  const refreshToken = generateRefreshToken();
+  const refreshTokenHash = hashRefreshToken(refreshToken);
+  const refreshExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+
+  await query(
+    "INSERT INTO app.sessions (user_id, refresh_token_hash, expires_at, user_agent) VALUES ($1, $2, $3, $4)",
+    [userId, refreshTokenHash, refreshExpiresAt, data.userAgent]
+  );
+
+  return {
+    user: {
+      id: userId,
+      email: userEmail,
+      username: userUsername,
+      emailVerified,
+      roles,
+    },
+    accessToken,
+    refreshToken,
+  };
+}
+

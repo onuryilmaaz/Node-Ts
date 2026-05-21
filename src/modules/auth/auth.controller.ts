@@ -22,6 +22,7 @@ import {
   listUserSessions,
   revokeSession,
   revokeOtherSessions,
+  loginOrRegisterWithClerk,
 } from "./auth.service";
 
 export async function register(req: Request, res: Response) {
@@ -262,3 +263,41 @@ export async function revokeOtherSessionsController(
   await revokeOtherSessions(req.user.userId, refreshToken);
   res.json({ success: true });
 }
+
+export async function clerkLogin(req: Request, res: Response) {
+  try {
+    const { token } = req.body as { token?: string };
+    if (!token) {
+      return res.status(400).json({ message: "Clerk token is required" });
+    }
+
+    const userAgent = req.headers["user-agent"] ?? null;
+    const result = await loginOrRegisterWithClerk({
+      token,
+      userAgent,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    if (err.message === "ACCOUNT_DEACTIVATED") {
+      return res.status(403).json({
+        message: "Hesabınız pasif durumdadır. Lütfen yönetici ile iletişime geçin.",
+        code: "ACCOUNT_DEACTIVATED",
+      });
+    }
+
+    if (err.message === "INVALID_CLERK_TOKEN") {
+      return res.status(401).json({
+        message: "Geçersiz veya süresi dolmuş Clerk token'ı.",
+        code: "INVALID_CLERK_TOKEN",
+      });
+    }
+
+    console.error("CLERK LOGIN ERROR:", err);
+
+    return res.status(500).json({
+      message: err.message || "Sunucu hatası",
+    });
+  }
+}
+
