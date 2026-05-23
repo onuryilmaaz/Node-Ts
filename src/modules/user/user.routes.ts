@@ -5,6 +5,7 @@ import {
   getProfile,
   updateProfile,
   uploadAvatar,
+  savePushToken,
 } from "./user.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { upload } from "../../middleware/upload.middleware";
@@ -16,5 +17,6 @@ router.post("/change-password", authMiddleware, changePasswordController);
 router.post("/avatar", authMiddleware, upload.single("avatar"), uploadAvatar);
 router.patch("/update-profile", authMiddleware, updateProfile);
 router.post("/deactivate", authMiddleware, deactivateAccountController);
+router.put("/push-token", authMiddleware, savePushToken);
 
 export default router;

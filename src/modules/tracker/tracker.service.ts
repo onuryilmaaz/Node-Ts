@@ -1,7 +1,8 @@
 import { db } from "../../db";
 import { addPointsForActivity } from "../gamification/gamification.service";
+import { reflectToGroups } from "../group/group.service";
 
-function calculatePoints(type: string, value: Record<string, unknown>): number {
+export function calculatePoints(type: string, value: Record<string, unknown>): number {
   switch (type) {
     case "quran": return Math.ceil((Number(value.pages) || 0) * 2);
     case "dhikr": return Math.max(1, Math.ceil((Number(value.count) || 0) / 33));
@@ -37,9 +38,13 @@ export async function logActivity(
      RETURNING *`,
     [userId, targetDate, activityType, JSON.stringify(value), notes ?? null],
   );
+  const log = result.rows[0];
   const points = calculatePoints(activityType, value);
   addPointsForActivity(userId, points).catch(() => {});
-  return result.rows[0];
+  reflectToGroups(userId, log.id, activityType, value).catch((e) =>
+    console.error("reflectToGroups error:", e),
+  );
+  return log;
 }
 
 export async function updateLog(

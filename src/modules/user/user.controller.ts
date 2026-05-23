@@ -7,6 +7,8 @@ import {
   uploadAvatarService,
 } from "./user.service";
 import { changePasswordSchema, updateProfileSchema } from "./user.schema";
+import { query } from "../../db";
+import Expo from "expo-server-sdk";
 
 export async function getProfile(req: Request, res: Response) {
   try {
@@ -97,4 +99,27 @@ export async function deactivateAccountController(req: Request, res: Response) {
     success: true,
     reloginRequired: true,
   });
+}
+
+export async function savePushToken(req: Request, res: Response) {
+  try {
+    if (!req.user) return res.status(401).json({ success: false });
+
+    const { token } = req.body;
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ success: false, message: "Token gerekli." });
+    }
+    if (!Expo.isExpoPushToken(token)) {
+      return res.status(400).json({ success: false, message: "Geçersiz push token." });
+    }
+
+    await query(
+      `UPDATE app.users SET expo_push_token = $1 WHERE id = $2`,
+      [token, req.user.userId],
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("save push token:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
 }

@@ -13,6 +13,8 @@ import gamificationRoutes from "./modules/gamification/gamification.routes";
 import challengeRoutes from "./modules/challenge/challenge.routes";
 import mosqueRoutes from "./modules/mosque/mosque.routes";
 import trackerRoutes from "./modules/tracker/tracker.routes";
+import groupRoutes from "./modules/group/group.routes";
+import { runGroupsMigration } from "./db/migrations/groups.migration";
 import { authMiddleware } from "./middleware/auth.middleware";
 import { sendEmail } from "./services/email.service";
 import { query } from "./db";
@@ -23,6 +25,8 @@ const app = express();
 query(
   "ALTER TABLE app.mosques ADD COLUMN IF NOT EXISTS image_public_id TEXT"
 ).catch((e) => console.error("Migration error:", e));
+
+runGroupsMigration().catch((e) => console.error("Groups migration error:", e));
 
 app.use(helmet());
 app.use(cors());
@@ -37,6 +41,7 @@ app.use("/gamification", gamificationRoutes);
 app.use("/challenges", challengeRoutes);
 app.use("/mosques", mosqueRoutes);
 app.use("/tracker", trackerRoutes);
+app.use("/groups", groupRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   res.json({
