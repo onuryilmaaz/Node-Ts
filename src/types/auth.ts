@@ -5,3 +5,9 @@ export type AccessTokenPayload = {
   emailVerified: boolean;
   isActive: boolean;
 };
+
+export type ChildTokenPayload = {
+  childId: string;
+  parentId: string;
+  type: "child_session";
+};
