@@ -183,7 +183,9 @@ export async function deleteTask(taskId: string, childId: string) {
 
 export async function getTodayTasksForChild(childId: string) {
   const today = turkeyDateStr();
-  const dayOfWeek = new Date().getDay();
+  // Turkey timezone-aware day of week (0=Sunday ... 6=Saturday)
+  const turkeyDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+  const dayOfWeek = turkeyDate.getDay();
 
   const result = await db.execute(
     `SELECT ct.*,
@@ -198,7 +200,7 @@ export async function getTodayTasksForChild(childId: string) {
        AND ct.is_active = true
        AND (
          ct.recurrence = 'daily'
-         OR (ct.recurrence = 'weekly' AND $3 = ANY(ct.scheduled_days))
+         OR (ct.recurrence = 'weekly' AND (ct.scheduled_days IS NULL OR $3 = ANY(ct.scheduled_days)))
          OR (ct.recurrence = 'once' AND ctc.id IS NULL)
        )
      ORDER BY ct.created_at ASC`,

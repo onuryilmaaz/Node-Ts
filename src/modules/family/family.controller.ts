@@ -68,7 +68,7 @@ export async function createChildSessionHandler(req: Request, res: Response) {
     return res.json({ success: true, token });
   } catch (e: any) {
     if (e.message === "PIN_NOT_SET") return res.status(400).json({ message: "PIN ayarlanmamış" });
-    if (e.message === "INVALID_PIN") return res.status(401).json({ message: "Hatalı PIN" });
+    if (e.message === "INVALID_PIN") return res.status(400).json({ message: "Hatalı PIN" });
     return res.status(500).json({ message: "Server error" });
   }
 }
