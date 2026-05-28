@@ -1,4 +1,5 @@
 import { db } from "../../db";
+import { getOzelGunDatesForUser } from "../ozel_gun/ozel_gun.service";
 
 function turkeyDateStr(d?: Date): string {
   return (d ?? new Date()).toLocaleDateString("en-CA", {
@@ -41,14 +42,18 @@ function prevDay(dateStr: string): string {
 async function calculateStreakFromLogs(
   userId: string,
 ): Promise<{ streak: number; lastDate: string | null }> {
-  const res = await db.execute(
-    `SELECT date::text AS d FROM app.prayer_logs
-     WHERE user_id = $1
-     GROUP BY date HAVING COUNT(*) >= 5
-     ORDER BY date DESC LIMIT 100`,
-    [userId],
-  );
-  if (res.rows.length === 0) return { streak: 0, lastDate: null };
+  const [res, ozelGunDates] = await Promise.all([
+    db.execute(
+      `SELECT date::text AS d FROM app.prayer_logs
+       WHERE user_id = $1
+       GROUP BY date HAVING COUNT(*) >= 5
+       ORDER BY date DESC LIMIT 100`,
+      [userId],
+    ),
+    getOzelGunDatesForUser(userId),
+  ]);
+
+  if (res.rows.length === 0 && ozelGunDates.size === 0) return { streak: 0, lastDate: null };
 
   const completed = new Set(res.rows.map((r: any) => r.d.substring(0, 10)));
   const todayStr = islamicDateStr();
@@ -57,10 +62,14 @@ async function calculateStreakFromLogs(
   let streak = 0;
   let lastDate: string | null = null;
 
-  for (let i = 0; i < 100; i++) {
+  // Walk backward up to 200 days; özel gün days skip without breaking the streak
+  for (let i = 0; i < 200; i++) {
     if (completed.has(current)) {
       if (!lastDate) lastDate = current;
       streak++;
+      current = prevDay(current);
+    } else if (ozelGunDates.has(current)) {
+      // Exempt day — don't count, but don't break either
       current = prevDay(current);
     } else {
       break;

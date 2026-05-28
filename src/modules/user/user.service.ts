@@ -16,6 +16,7 @@ export async function getUserProfile(userId: string) {
       last_name AS "lastName",
       phone,
       avatar_url AS "avatarUrl",
+      gender,
       auth_provider AS "authProvider",
       provider_id AS "providerId",
       is_active AS "isActive",
@@ -94,6 +95,7 @@ export async function updateUserProfile(
     lastName: "last_name",
     phone: "phone",
     username: "username",
+    gender: "gender",
   };
 
   const setClauses: string[] = [];

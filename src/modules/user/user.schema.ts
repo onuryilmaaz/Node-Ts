@@ -12,5 +12,6 @@ export const updateProfileSchema = z.object({
   lastName: z.string().min(1).optional(),
   phone: z.string().min(5).optional(),
   username: z.string().min(3).max(30).optional(),
+  gender: z.enum(['erkek', 'kadin']).optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

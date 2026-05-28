@@ -15,8 +15,10 @@ import mosqueRoutes from "./modules/mosque/mosque.routes";
 import trackerRoutes from "./modules/tracker/tracker.routes";
 import groupRoutes from "./modules/group/group.routes";
 import familyRoutes from "./modules/family/family.routes";
+import ozelGunRoutes from "./modules/ozel_gun/ozel_gun.routes";
 import { runGroupsMigration } from "./db/migrations/groups.migration";
 import { runFamilyMigration } from "./db/migrations/family.migration";
+import { runOzelGunMigration } from "./db/migrations/ozel_gun.migration";
 import { authMiddleware } from "./middleware/auth.middleware";
 import { sendEmail } from "./services/email.service";
 import { query } from "./db";
@@ -30,6 +32,7 @@ query(
 
 runGroupsMigration().catch((e) => console.error("Groups migration error:", e));
 runFamilyMigration().catch((e) => console.error("Family migration error:", e));
+runOzelGunMigration().catch((e) => console.error("OzelGun migration error:", e));
 
 app.use(helmet());
 app.use(cors());
@@ -46,6 +49,7 @@ app.use("/mosques", mosqueRoutes);
 app.use("/tracker", trackerRoutes);
 app.use("/groups", groupRoutes);
 app.use("/family", familyRoutes);
+app.use("/ozel-gun", ozelGunRoutes);
 
 app.get("/health", (req: Request, res: Response) => {
   res.json({
