@@ -59,12 +59,38 @@ app.use("/ozel-gun", ozelGunRoutes);
 app.use("/goals", goalsRoutes);
 app.use("/hifz", hifzRoutes);
 
-app.get("/health", (req: Request, res: Response) => {
+const SERVER_START = Date.now();
+
+// /health — liveness probe (process ayakta mı)
+app.get("/health", (_req: Request, res: Response) => {
   res.json({
-    status: "OK",
+    status: "ok",
+    app: "salah-api",
     runtime: "bun",
-    ts: true,
+    uptime_seconds: Math.floor((Date.now() - SERVER_START) / 1000),
+    timestamp: new Date().toISOString(),
   });
+});
+
+// /health/ready — readiness probe (DB hazır mı)
+app.get("/health/ready", async (_req: Request, res: Response) => {
+  try {
+    const start = Date.now();
+    await query("SELECT 1");
+    const dbMs = Date.now() - start;
+    res.json({
+      status: "ready",
+      checks: { database: { ok: true, latency_ms: dbMs } },
+      uptime_seconds: Math.floor((Date.now() - SERVER_START) / 1000),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    res.status(503).json({
+      status: "not_ready",
+      checks: { database: { ok: false, error: e?.message ?? "unknown" } },
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
 app.post("/test-mail", async (req, res) => {
