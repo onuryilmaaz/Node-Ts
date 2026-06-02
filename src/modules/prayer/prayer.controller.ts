@@ -8,7 +8,7 @@ export async function trackPrayer(req: Request, res: Response) {
     if (!userId)
       return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    const { prayer_time, is_kaza } = req.body;
+    const { prayer_time, is_kaza, date } = req.body;
     if (!prayer_time)
       return res
         .status(400)
@@ -21,7 +21,18 @@ export async function trackPrayer(req: Request, res: Response) {
         .json({ success: false, message: "Geçersiz namaz vakti" });
     }
 
-    const targetDateStr = islamicDateStr();
+    // Geriye dönük tracking: tarih opsiyonel, varsa kullan ama ileride yasak.
+    const today = islamicDateStr();
+    let targetDateStr = today;
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ success: false, message: "Geçersiz tarih formatı (YYYY-MM-DD)" });
+      }
+      if (date > today) {
+        return res.status(400).json({ success: false, message: "Gelecek tarih için kayıt yapılamaz" });
+      }
+      targetDateStr = date;
+    }
 
     const existing = await db.execute(
       `SELECT id FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
@@ -69,23 +80,52 @@ export async function trackPrayer(req: Request, res: Response) {
   }
 }
 
+export async function getPrayerLogsForDate(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ success: false });
+    const { date } = req.params;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, message: "Geçersiz tarih (YYYY-MM-DD)" });
+    }
+    const result = await db.execute(
+      `SELECT id, prayer_time, is_kaza, created_at
+       FROM app.prayer_logs
+       WHERE user_id = $1 AND date = $2
+       ORDER BY created_at ASC`,
+      [userId, date],
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Prayer logs by date error:", err);
+    return res.status(500).json({ success: false });
+  }
+}
+
 export async function untrackPrayer(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
     if (!userId)
       return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    const { prayer_time } = req.body;
+    const { prayer_time, date } = req.body;
     if (!prayer_time)
       return res
         .status(400)
         .json({ success: false, message: "prayer_time is required" });
 
-    const todayStr = islamicDateStr();
+    const today = islamicDateStr();
+    let targetDateStr = today;
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ success: false, message: "Geçersiz tarih formatı (YYYY-MM-DD)" });
+      }
+      targetDateStr = date;
+    }
 
     const existing = await db.execute(
       `SELECT id, points_earned FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
-      [userId, todayStr, prayer_time],
+      [userId, targetDateStr, prayer_time],
     );
 
     if (existing.rows.length === 0) {
@@ -98,7 +138,7 @@ export async function untrackPrayer(req: Request, res: Response) {
 
     await db.execute(
       `DELETE FROM app.prayer_logs WHERE user_id = $1 AND date = $2 AND prayer_time = $3`,
-      [userId, todayStr, prayer_time],
+      [userId, targetDateStr, prayer_time],
     );
 
     await db.execute(
