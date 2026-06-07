@@ -6,6 +6,7 @@ import {
   getStatsMonthly,
   getLevelInfo,
 } from "./gamification.controller";
+import { getYearlyWrap } from "./yearly.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 
 const router = Router();
@@ -15,5 +16,6 @@ router.get("/stats/weekly", authMiddleware, getStatsWeekly);
 router.get("/stats/monthly", authMiddleware, getStatsMonthly);
 router.get("/level", authMiddleware, getLevelInfo);
 router.get("/leaderboard", authMiddleware, getLeaderboardTop);
+router.get("/yearly-wrap", authMiddleware, getYearlyWrap);
 
 export default router;
