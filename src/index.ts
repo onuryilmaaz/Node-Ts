@@ -18,6 +18,7 @@ import familyRoutes from "./modules/family/family.routes";
 import ozelGunRoutes from "./modules/ozel_gun/ozel_gun.routes";
 import goalsRoutes from "./modules/goals/goals.routes";
 import hifzRoutes from "./modules/hifz/hifz.routes";
+import assistantRoutes from "./modules/assistant/assistant.routes";
 import { runGroupsMigration } from "./db/migrations/groups.migration";
 import { runFamilyMigration } from "./db/migrations/family.migration";
 import { runOzelGunMigration } from "./db/migrations/ozel_gun.migration";
@@ -66,6 +67,7 @@ app.use("/family", familyRoutes);
 app.use("/ozel-gun", ozelGunRoutes);
 app.use("/goals", goalsRoutes);
 app.use("/hifz", hifzRoutes);
+app.use("/assistant", assistantRoutes);
 
 const SERVER_START = Date.now();
 
