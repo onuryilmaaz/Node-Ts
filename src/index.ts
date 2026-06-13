@@ -29,6 +29,10 @@ import { query } from "./db";
 
 const app = express();
 
+// Tek bir reverse proxy/load balancer arkasında çalışırken gerçek istemci
+// IP'sini (X-Forwarded-For) güvenle okumak için — rate limiting buna dayanır.
+app.set("trust proxy", 1);
+
 // Migration: add image_public_id column if not exists
 query(
   "ALTER TABLE app.mosques ADD COLUMN IF NOT EXISTS image_public_id TEXT"
