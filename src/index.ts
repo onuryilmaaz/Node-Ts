@@ -24,8 +24,12 @@ import { runOzelGunMigration } from "./db/migrations/ozel_gun.migration";
 import { runGoalsMigration } from "./db/migrations/goals.migration";
 import { runHifzMigration } from "./db/migrations/hifz.migration";
 import { authMiddleware } from "./middleware/auth.middleware";
-import { sendEmail } from "./services/email.service";
 import { query } from "./db";
+import { initSentry, captureException } from "./services/sentry.service";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+
+// Hata izlemeyi her şeyden önce başlat (DSN yoksa no-op).
+initSentry();
 
 const app = express();
 
@@ -97,20 +101,26 @@ app.get("/health/ready", async (_req: Request, res: Response) => {
   }
 });
 
-app.post("/test-mail", async (req, res) => {
-  await sendEmail({
-    to: "onuryilm.41@gmail.com",
-    subject: "Brevo Test Mail",
-    html: "<h2>Mail başarıyla gönderildi 🚀</h2>",
-  });
-
-  res.json({ ok: true });
-});
-
 app.get("/me", authMiddleware, (req, res) => {
   res.json({
     user: req.user,
   });
+});
+
+// Eşleşmeyen route'lar için 404 (tüm route'lardan sonra).
+app.use(notFoundHandler);
+
+// Merkezi hata yakalayıcı (en sonda olmalı).
+app.use(errorHandler);
+
+// Process seviyesinde yakalanmamış hatalar — log + Sentry.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
+  captureException(reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+  captureException(err);
 });
 
 app.listen(process.env.PORT || 3000, () => {
