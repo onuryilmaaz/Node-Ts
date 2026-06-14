@@ -11,6 +11,15 @@ export const aiEnabled = Boolean(apiKey);
 
 const ai = aiEnabled ? new GoogleGenAI({ apiKey }) : null;
 
+// gemini-2.5+ "thinking" modelleri varsayılan olarak düşünme token'ı harcar;
+// kısa maxOutputTokens ile bu, çıktıyı boş/yarım bırakır (finishReason=MAX_TOKENS).
+// Bu basit üretim görevlerinde düşünmeyi kapatıyoruz. 2.0-flash gibi modellerde
+// thinkingConfig gönderilmez (gereksiz/uyumsuz olmasın diye).
+const isThinkingModel = /2\.5|2\.6|thinking|gemini-3|gemini-flash-latest/i.test(MODEL);
+const THINKING_OFF: Record<string, any> = isThinkingModel
+  ? { thinkingConfig: { thinkingBudget: 0 } }
+  : {};
+
 const PRAYER_TR: Record<string, string> = {
   fajr: "sabah",
   dhuhr: "öğle",
@@ -19,7 +28,11 @@ const PRAYER_TR: Record<string, string> = {
   isha: "yatsı",
 };
 
-type RunOpts = { temperature?: number; maxOutputTokens?: number };
+type RunOpts = {
+  temperature?: number;
+  maxOutputTokens?: number;
+  json?: boolean; // çıktıyı geçerli JSON'a zorla
+};
 
 /** Düşük seviye tek atımlık üretim. AI kapalı/başarısızsa null döner. */
 async function run(prompt: string, opts: RunOpts = {}): Promise<string | null> {
@@ -30,7 +43,9 @@ async function run(prompt: string, opts: RunOpts = {}): Promise<string | null> {
       contents: prompt,
       config: {
         temperature: opts.temperature ?? 0.8,
-        maxOutputTokens: opts.maxOutputTokens ?? 256,
+        maxOutputTokens: opts.maxOutputTokens ?? 512,
+        ...THINKING_OFF,
+        ...(opts.json ? { responseMimeType: "application/json" } : {}),
       },
     });
     const text = response.text?.trim();
@@ -130,15 +145,6 @@ Sadece içgörü metnini döndür.`;
 // 3) Kişisel hedef önerisi
 // ─────────────────────────────────────────────────────────────────────────
 
-const VALID_ACTIVITIES = [
-  "quran",
-  "dhikr",
-  "nafile",
-  "fasting",
-  "dua",
-  "memorization",
-] as const;
-
 export interface GoalSuggestionContext {
   currentStreak: number;
   totalPoints: number;
@@ -150,6 +156,34 @@ export interface GoalSuggestion {
   activity_type: string;
   target: number;
   reason: string;
+}
+
+// Model bazen kanonik enum yerine Türkçe/İngilizce etiket döndürür
+// ("Kuran", "Zikir"...). Bunları geçerli activity_type'a normalize ediyoruz.
+const ACTIVITY_ALIASES: Record<string, string> = {
+  quran: "quran",
+  kuran: "quran",
+  "kur'an": "quran",
+  dhikr: "dhikr",
+  zikir: "dhikr",
+  zikr: "dhikr",
+  nafile: "nafile",
+  "nafile namaz": "nafile",
+  sunnah: "nafile",
+  fasting: "fasting",
+  oruc: "fasting",
+  oruç: "fasting",
+  dua: "dua",
+  "dua/zikir": "dua",
+  memorization: "memorization",
+  ezber: "memorization",
+  hifz: "memorization",
+  hıfz: "memorization",
+};
+
+function normalizeActivity(raw: string): string | null {
+  const key = String(raw ?? "").trim().toLowerCase();
+  return ACTIVITY_ALIASES[key] ?? null;
 }
 
 export async function generateGoalSuggestions(
@@ -168,7 +202,8 @@ export async function generateGoalSuggestions(
   const prompt = `${SYSTEM_PERSONA}
 Kullanıcı için gerçekçi, ulaşılabilir GÜNLÜK ibadet hedefleri öner. Mevcut seviyesine göre kademeli ilerlet (çok agresif olma).
 
-Geçerli activity_type değerleri: quran (sayfa/gün), dhikr (adet/gün), nafile (rekat/gün), fasting (gün/hafta), dua (dakika/gün), memorization (ayet/gün).
+"activity_type" alanı MUTLAKA şu İngilizce, küçük harf değerlerden biri olmalı — başka değer (örn. "namaz", "şükür", "Kuran") KULLANMA:
+quran (sayfa/gün), dhikr (adet/gün), nafile (rekat/gün), fasting (gün/hafta), dua (dakika/gün), memorization (ayet/gün).
 
 Kullanıcı durumu:
 - Güncel seri: ${ctx.currentStreak} gün
@@ -178,25 +213,31 @@ Kullanıcı durumu:
 En fazla 4 öneri ver. SADECE şu formatta geçerli JSON dizisi döndür, başka hiçbir şey yazma:
 [{"activity_type":"quran","target":10,"reason":"kısa Türkçe gerekçe"}]`;
 
-  const result = parseJson<GoalSuggestion[]>(
-    await run(prompt, { temperature: 0.6, maxOutputTokens: 400 })
+  const result = parseJson<any[]>(
+    await run(prompt, { temperature: 0.6, maxOutputTokens: 800, json: true })
   );
   if (!Array.isArray(result)) return null;
 
-  // Doğrula ve temizle.
+  // Normalize et, doğrula, temizle. Geçersiz activity_type'lar elenmek yerine
+  // mümkünse kanonik değere eşlenir (Kuran→quran, Zikir→dhikr ...).
+  const seen = new Set<string>();
   return result
-    .filter(
-      (s) =>
-        s &&
-        VALID_ACTIVITIES.includes(s.activity_type as any) &&
-        Number.isFinite(Number(s.target)) &&
-        Number(s.target) > 0
-    )
-    .map((s) => ({
-      activity_type: s.activity_type,
-      target: Math.round(Number(s.target)),
-      reason: String(s.reason ?? "").slice(0, 200),
-    }))
+    .map((s) => {
+      const activity = normalizeActivity(s?.activity_type);
+      const target = Math.round(Number(s?.target));
+      if (!activity || !Number.isFinite(target) || target <= 0) return null;
+      return {
+        activity_type: activity,
+        target,
+        reason: String(s?.reason ?? "").slice(0, 200),
+      } as GoalSuggestion;
+    })
+    .filter((s): s is GoalSuggestion => {
+      if (!s) return false;
+      if (seen.has(s.activity_type)) return false; // tekrar eden aktiviteyi at
+      seen.add(s.activity_type);
+      return true;
+    })
     .slice(0, 4);
 }
 
@@ -264,7 +305,8 @@ Kısa ve anlaşılır yanıt ver.`;
       config: {
         systemInstruction,
         temperature: 0.7,
-        maxOutputTokens: 600,
+        maxOutputTokens: 800,
+        ...THINKING_OFF,
       },
     });
     const text = response.text?.trim();
