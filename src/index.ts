@@ -28,6 +28,7 @@ import { authMiddleware } from "./middleware/auth.middleware";
 import { query } from "./db";
 import { initSentry, captureException } from "./services/sentry.service";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { requestLogger } from "./middleware/requestLogger";
 
 // Hata izlemeyi her şeyden önce başlat (DSN yoksa no-op).
 initSentry();
@@ -52,6 +53,7 @@ runHifzMigration().catch((e) => console.error("Hifz migration error:", e));
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use("/auth", authRoutes);

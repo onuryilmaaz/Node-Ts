@@ -12,19 +12,27 @@ import {
   getPrayerLogsForDate,
 } from "./prayer.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { validate } from "../../middleware/validate";
+import {
+  trackPrayerSchema,
+  untrackPrayerSchema,
+  addKazaSchema,
+  batchAddKazaSchema,
+  quickKazaSchema,
+} from "./prayer.schema";
 
 const router = Router();
 
-router.post("/track", authMiddleware, trackPrayer);
-router.delete("/track", authMiddleware, untrackPrayer);
+router.post("/track", authMiddleware, validate(trackPrayerSchema), trackPrayer);
+router.delete("/track", authMiddleware, validate(untrackPrayerSchema), untrackPrayer);
 
 router.get("/history", authMiddleware, getPrayerHistory);
 router.get("/by-date/:date", authMiddleware, getPrayerLogsForDate);
 
 router.get("/kaza", authMiddleware, getKazaList);
-router.post("/kaza", authMiddleware, addKazaPrayer);
-router.post("/kaza/batch", authMiddleware, batchAddKaza);
-router.post("/kaza/quick-complete", authMiddleware, quickDecrementKaza);
+router.post("/kaza", authMiddleware, validate(addKazaSchema), addKazaPrayer);
+router.post("/kaza/batch", authMiddleware, validate(batchAddKazaSchema), batchAddKaza);
+router.post("/kaza/quick-complete", authMiddleware, validate(quickKazaSchema), quickDecrementKaza);
 router.patch("/kaza/:id/complete", authMiddleware, completeKazaPrayer);
 router.delete("/kaza/:id", authMiddleware, deleteKazaPrayer);
 
